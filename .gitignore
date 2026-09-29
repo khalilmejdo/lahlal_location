@@ -1,0 +1,21 @@
+# Secrets : ce fichier porte APP_SECRET, le poivre des mots de passe et la
+# chaine de connexion. Il ne doit jamais partir dans le depot.
+.env
+.env.*
+!.env.example
+
+node_modules/
+
+# Donnees de travail : l'ancre du journal d'audit, les fichiers temporaires.
+# Le dossier existe en production et doit y etre PERSISTANT.
+data/
+
+# Sorties d'essais et captures
+*.log
+/tmp/
+coverage/
+
+# Systeme
+.DS_Store
+Thumbs.db
+desktop.ini

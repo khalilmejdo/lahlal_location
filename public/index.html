@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="fr" data-theme="auto">
+<head>
+  <meta charset="utf-8">
+  <!-- viewport-fit=cover : sur un telephone a encoche, le bouton flottant
+       doit se poser au-dessus de la barre systeme, pas dessous. Les styles
+       s'appuient sur env(safe-area-inset-bottom). -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="Gestion de flotte : véhicules, activités, dépenses, recettes, entretiens et échéances.">
+  <!-- Application interne : elle n'a rien a faire dans un moteur de recherche. -->
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#0d1520">
+  <title>Lahlal — gestion de flotte</title>
+
+  <link rel="icon" href="/img/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/css/app.css">
+  <script type="module" src="/js/app.js"></script>
+</head>
+<body>
+
+<!-- Zone d'annonce pour les lecteurs d'ecran -->
+<div id="annonceur" class="sr-only" role="status" aria-live="polite"></div>
+
+<a href="#contenu" class="lien-evitement">Aller au contenu principal</a>
+
+<!-- ================= Ecran de chargement ================= -->
+<div id="ecran-demarrage" class="ecran-demarrage">
+  <div class="demarrage-marque">
+    <div class="demarrage-pouls" aria-hidden="true">
+      <svg viewBox="0 0 120 40" width="120" height="40">
+        <polyline points="0,20 28,20 36,6 46,34 56,20 74,20 82,12 90,28 98,20 120,20"
+                  fill="none" stroke="currentColor" stroke-width="2.5"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <p class="demarrage-texte">Chargement de l’application…</p>
+  </div>
+</div>
+
+<!-- ================= Application ================= -->
+<div id="application" class="application" hidden>
+
+  <aside class="rail" id="rail">
+    <div class="rail-marque">
+      <span class="marque-texte">
+        <strong>LAHLAL</strong>
+        <span>Gestion de flotte</span>
+      </span>
+    </div>
+
+    <nav class="rail-nav" id="navigation" aria-label="Navigation principale"></nav>
+
+    <div class="rail-pied">
+      <button type="button" class="bouton-rail" id="bouton-theme" title="Changer de thème">
+        <span class="icone" aria-hidden="true"></span>
+        <span class="libelle">Thème</span>
+      </button>
+      <div class="carte-utilisateur" id="carte-utilisateur"></div>
+    </div>
+  </aside>
+
+  <div class="zone">
+    <header class="barre">
+      <button type="button" class="bouton-menu" id="bouton-menu" aria-label="Afficher le menu">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
+             stroke-width="1.9" stroke-linecap="round" aria-hidden="true">
+          <path d="M3 12h18M3 6h18M3 18h18"/>
+        </svg>
+      </button>
+
+      <div class="fil" id="fil-ariane" aria-label="Fil d’Ariane"></div>
+
+      <div class="barre-actions" id="barre-actions"></div>
+    </header>
+
+    <main class="contenu" id="contenu" tabindex="-1"></main>
+  </div>
+</div>
+
+<!-- ================= Superpositions ================= -->
+<div id="conteneur-modales" class="conteneur-modales"></div>
+<div id="conteneur-notifications" class="conteneur-notifications" aria-live="polite"></div>
+
+</body>
+</html>

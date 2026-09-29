@@ -1,0 +1,27 @@
+{
+  "name": "lahlal-flotte",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Lahlal — gestion de flotte et suivi d'activite : vehicules, activites, entretiens, echeances et alertes",
+  "type": "module",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "keygen": "node scripts/keygen.js",
+    "check": "node scripts/check-config.js",
+    "migrate": "node scripts/migrate.js",
+    "seed": "node scripts/seed.js",
+    "superadmin": "node scripts/superadmin.js",
+    "start:conteneur": "node scripts/demarrer.js",
+    "check:imports": "node scripts/check-imports.mjs",
+    "test": "node --test \"test/*.test.js\"",
+    "test:integration": "node --test --test-concurrency=1 \"test/integration/*.test.js\"",
+    "verify": "npm run check:imports && npm test && npm run test:integration"
+  },
+  "dependencies": {
+    "pg": "^8.23.0"
+  }
+}
