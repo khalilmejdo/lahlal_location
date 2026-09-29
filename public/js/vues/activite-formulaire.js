@@ -26,7 +26,7 @@
  * cote ecran finirait par dire autre chose que la sienne.
  */
 import {
-  h, fill, api, etat, modale, champ, saisie, liste, zoneTexte, icone,
+  h, fill, donnee, api, etat, modale, champ, saisie, liste, zoneTexte, icone,
   montantSigne, versCentimes, aujourdhui, signalerErreur, confirmer, entier,
 } from '../core.js';
 import { selecteurPieces } from './pieces.js';
@@ -42,6 +42,35 @@ import { selecteurPieces } from './pieces.js';
  */
 const nouvelleCle = () =>
   'act-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+
+/**
+ * Le véhicule et le type de la dernière saisie.
+ *
+ * Gardés dans le navigateur, pas en base : c'est une commodité par poste,
+ * pas une donnée. Deux personnes qui partagent un compte n'ont pas les mêmes
+ * habitudes, et le serveur n'a rien à savoir de celles-ci.
+ *
+ * Toute lecture et toute écriture sont protégées : en navigation privée ou
+ * avec le stockage bloqué, l'accès lève, et le formulaire doit s'ouvrir
+ * quand même — simplement sans se souvenir.
+ */
+const CLE_DERNIERE_SAISIE = 'flotte:derniere-saisie';
+
+function lireDerniereSaisie() {
+  try {
+    return JSON.parse(localStorage.getItem(CLE_DERNIERE_SAISIE)) || {};
+  } catch {
+    return {};
+  }
+}
+
+function retenirDerniereSaisie(valeur) {
+  try {
+    localStorage.setItem(CLE_DERNIERE_SAISIE, JSON.stringify(valeur));
+  } catch {
+    // Stockage indisponible : on ne se souviendra pas, et c'est tout.
+  }
+}
 
 /**
  * Ouvre le formulaire. Rend l'activite creee, ou null si l'on renonce.
@@ -71,29 +100,47 @@ export function ouvrirFormulaireActivite({ vehiculeId = null } = {}) {
 
     /* --- Les champs --- */
 
+    // On rouvre sur le véhicule et le type de la dernière saisie : dans une
+    // journée, on enregistre plusieurs fois la même chose avec le même
+    // camion. Deux listes à reparcourir à chaque fois, c'est deux gestes de
+    // trop — et c'est le genre de friction qui décourage de tout saisir.
+    const dernier = lireDerniereSaisie();
+
     const champVehicule = liste(
-      vehicules.map((v) => ({ value: v.id, label: v.nom + ' — ' + v.immatriculation })),
-      vehiculeId ?? vehicules[0].id,
+      vehicules.map((v) => ({ value: v.id, label: donnee(v.nom + ' — ' + v.immatriculation) })),
+      vehiculeId
+        ?? (vehicules.some((v) => v.id === dernier.vehiculeId) ? dernier.vehiculeId : null)
+        ?? vehicules[0].id,
       { onchange: () => rappelerCompteur() },
     );
 
     const champDate = saisie({ type: 'date', value: aujourdhui(), max: aujourdhui(), required: true });
-    const champPrestation = saisie({ maxlength: 200, required: true, placeholder: 'Remorquage Oujda → Nador' });
+    // La prestation n'est PAS obligatoire à l'écran : laissée vide, elle
+    // reprend le libellé du type. « Carburant, 400 DH » est une saisie
+    // complète et honnête ; exiger en plus d'écrire « Carburant » dans une
+    // case ne documente rien et coûte un clavier de plus.
+    const champPrestation = saisie({ maxlength: 200 });
     const champKm = saisie({ type: 'number', inputmode: 'numeric', min: 0, max: 3000000, placeholder: 'Compteur' });
     const champDepense = saisie({ type: 'text', inputmode: 'decimal', placeholder: '0,00' });
     const champRecette = saisie({ type: 'text', inputmode: 'decimal', placeholder: '0,00' });
     const champNotes = zoneTexte({ rows: 2, maxlength: 4000, placeholder: 'Précision utile (facultatif)' });
 
-    const compteurConnu = h('small', { class: 'ligne-note' });
+    // Un bloc, pas un « small » : en ligne, il se collait a l'etiquette du
+    // champ suivant — « 162 300 kmPrestation ».
+    const compteurConnu = h('p', { class: 'ligne-note' });
     const ligneResultat = h('strong', { class: 'resultat-positif' }, '0,00 DH');
     const avis = h('p', { class: 'ligne-note', role: 'alert' });
+    const etiquetteDepense = h('span', {}, 'Dépense (DH)');
+    const etiquetteRecette = h('span', {}, 'Recette (DH)');
 
-    let typeRetenu = types[0]?.code ?? 'AUTRE';
+    let typeRetenu = types.some((t) => t.code === dernier.typeCode)
+      ? dernier.typeCode
+      : (types[0]?.code ?? 'AUTRE');
 
     const rappelerCompteur = () => {
       const v = vehicules.find((x) => x.id === champVehicule.value);
       fill(compteurConnu, v && v.kilometrage != null
-        ? 'Dernier relevé connu : ' + entier(v.kilometrage) + ' km'
+        ? h('span', {}, 'Dernier relevé connu : ', donnee(entier(v.kilometrage) + ' km'))
         : 'Aucun relevé connu pour ce véhicule.');
     };
 
@@ -116,6 +163,7 @@ export function ouvrirFormulaireActivite({ vehiculeId = null } = {}) {
     /* --- Les types, en boutons (§23) --- */
 
     const boutonsType = h('div', { class: 'choix-type' });
+
     const peindreTypes = () => {
       fill(boutonsType, ...types.map((t) => h('button', {
         type: 'button',
@@ -123,16 +171,57 @@ export function ouvrirFormulaireActivite({ vehiculeId = null } = {}) {
         onclick: () => {
           typeRetenu = t.code;
           peindreTypes();
-          // Le sens oriente le clavier vers le champ qu'on remplit
-          // habituellement. Il n'interdit rien : une location peut coûter.
+          orienterMontants();
+          // Le sens amène le clavier sur le champ qu'on remplit neuf fois
+          // sur dix. Il n'interdit rien : une location peut coûter.
           if (t.sens === 'DEPENSE') champDepense.focus();
           else if (t.sens === 'RECETTE') champRecette.focus();
         },
-      }, t.libelle)));
+      }, donnee(t.libelle))));
     };
+
+    /**
+     * Marque le champ de montant attendu, sans déplacer l'autre.
+     *
+     * Les deux restent côte à côte, au même endroit : un champ qui bouge
+     * quand on choisit un type ferait perdre plus de temps qu'il n'en fait
+     * gagner. Seule l'étiquette dit lequel on attend.
+     */
+    const orienterMontants = () => {
+      const t = types.find((x) => x.code === typeRetenu);
+      const attendu = t?.sens ?? 'MIXTE';
+      fill(etiquetteDepense, 'Dépense (DH)', attendu === 'DEPENSE' ? ' ·' : '');
+      fill(etiquetteRecette, 'Recette (DH)', attendu === 'RECETTE' ? ' ·' : '');
+      champDepense.placeholder = attendu === 'DEPENSE' ? 'Montant payé' : '0,00';
+      champRecette.placeholder = attendu === 'RECETTE' ? 'Montant encaissé' : '0,00';
+      // La prestation propose le libellé du type : c'est ce qui sera
+      // enregistré si on ne l'écrit pas soi-même.
+      champPrestation.placeholder = t ? t.libelle : 'Ce que vous avez fait';
+    };
+
     peindreTypes();
+    orienterMontants();
 
     const pieces = selecteurPieces();
+
+    /*
+     * La note se déplie, elle ne s'impose pas.
+     *
+     * Elle sert une fois sur vingt. Laissée ouverte, elle allonge le
+     * formulaire d'un bloc que la plupart des saisies franchissent sans le
+     * remplir — et sur téléphone, chaque bloc traversé est du défilement.
+     */
+    const zoneNote = h('div', { hidden: true }, champ('Note', champNotes, { large: true }));
+    const ouvrirNote = h('button', {
+      type: 'button',
+      class: 'bouton sourdine petit',
+      onclick: () => {
+        zoneNote.hidden = false;
+        ouvrirNote.hidden = true;
+        champNotes.focus();
+      },
+    }, icone('crayon'), h('span', {}, 'Ajouter une note'));
+    const blocNote = h('div', {}, ouvrirNote, zoneNote);
 
     /* --- L'enregistrement --- */
 
@@ -148,17 +237,18 @@ export function ouvrirFormulaireActivite({ vehiculeId = null } = {}) {
         fill(avis, 'Un montant ne se lit pas. Exemple attendu : 1 035,50');
         return null;
       }
-      if (!champPrestation.value.trim()) {
-        fill(avis, 'Indiquez ce qui a été fait.');
-        champPrestation.focus();
-        return null;
-      }
+
+      // Prestation laissée vide : on enregistre le libellé du type. Le
+      // serveur, lui, continue d'en exiger une — l'historique n'a jamais de
+      // ligne sans intitulé, c'est le client qui fournit le défaut.
+      const libelleType = types.find((t) => t.code === typeRetenu)?.libelle ?? typeRetenu;
+      const prestation = champPrestation.value.trim() || libelleType;
 
       const corps = {
         vehiculeId: champVehicule.value,
         date: champDate.value,
         typeCode: typeRetenu,
-        prestation: champPrestation.value.trim(),
+        prestation,
         kilometrage: champKm.value === '' ? undefined : Number(champKm.value),
         depenseCents,
         recetteCents,
@@ -170,6 +260,8 @@ export function ouvrirFormulaireActivite({ vehiculeId = null } = {}) {
       valider.disabled = true;
       try {
         const { activite } = await api.post('/api/activites', corps);
+        // La prochaine ouverture repartira sur ce véhicule et ce type.
+        retenirDerniereSaisie({ vehiculeId: corps.vehiculeId, typeCode: corps.typeCode });
         // Les pieces partent APRES : elles ont besoin de l'identifiant. Si
         // leur envoi echoue, l'activite reste — on ne perd pas la saisie
         // pour une photo, on le dit et elles se rajoutent depuis la fiche.
@@ -211,30 +303,38 @@ export function ouvrirFormulaireActivite({ vehiculeId = null } = {}) {
         if (creee) { finir(creee); m.fermer(); }
       },
     },
-    champ('Véhicule', champVehicule, { large: true }),
-    h('div', { class: 'ligne-champs' },
-      champ('Date', champDate),
-      champ('Kilométrage', champKm, { aide: null })),
-    compteurConnu,
-
+    // L'ORDRE EST CELUI DE LA SAISIE RÉELLE, pas celui du cahier des
+    // charges. On choisit d'abord CE QU'ON A FAIT — c'est la décision qui
+    // oriente tout le reste —, puis on tape le montant. Le véhicule et la
+    // date sont déjà justes neuf fois sur dix : ils se relisent, ils ne se
+    // remplissent pas.
     h('div', { class: 'champ large' },
       h('span', {}, 'Type d’activité'),
       boutonsType),
 
-    champ('Prestation', champPrestation, { large: true, aide: 'Ce que vous avez fait, en clair.' }),
-
     h('div', { class: 'ligne-champs' },
-      champ('Dépense (DH)', champDepense),
-      champ('Recette (DH)', champRecette)),
+      h('label', { class: 'champ' }, etiquetteDepense, champDepense),
+      h('label', { class: 'champ' }, etiquetteRecette, champRecette)),
 
     h('div', { class: 'encadre' },
-      h('span', {}, 'Résultat '),
-      ligneResultat,
-      h('small', { class: 'ligne-note' },
+      h('div', { class: 'titre' }, 'Résultat ', ligneResultat),
+      h('div', { class: 'ligne-note' },
         'Recette moins dépense. Activité non déclarée : aucune TVA n’est appliquée.')),
 
-    champ('Notes', champNotes, { large: true }),
+    h('div', { class: 'ligne-champs' },
+      champ('Véhicule', champVehicule),
+      champ('Date', champDate)),
+
+    champ('Kilométrage', champKm, { large: true }),
+    compteurConnu,
+
+    champ('Prestation', champPrestation, {
+      large: true,
+      aide: 'Facultatif. Sans rien, le type sert de libellé.',
+    }),
+
     pieces.noeud,
+    blocNote,
     avis);
 
     const m = modale({
@@ -257,6 +357,11 @@ export function ouvrirFormulaireActivite({ vehiculeId = null } = {}) {
 
     rappelerCompteur();
     recalculer();
-    champPrestation.focus();
+
+    // Le curseur se pose sur le MONTANT, pas sur la prestation : le type est
+    // déjà choisi — celui de la dernière fois — et la prestation est
+    // facultative. Ce qui reste à taper, c'est le chiffre.
+    const sensRetenu = types.find((t) => t.code === typeRetenu)?.sens;
+    (sensRetenu === 'RECETTE' ? champRecette : champDepense).focus();
   });
 }

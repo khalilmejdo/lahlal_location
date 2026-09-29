@@ -342,6 +342,49 @@ describe('Aucune trace du domaine d’origine', () => {
     assert.deepEqual(coupables, [], 'tables du socle d’origine encore interrogées');
   });
 
+  test('aucun écran n’appelle un helper de core.js sans l’importer', () => {
+    /*
+     * CE QUE check-imports NE VOIT PAS.
+     *
+     * Le vérificateur d'imports contrôle que chaque nom IMPORTÉ existe bien
+     * à l'export. Il ne dit rien du contraire : un helper appelé mais
+     * jamais importé passe l'analyse, passe `node --check`, et n'échoue
+     * qu'à l'exécution — sur l'écran concerné, chez l'utilisateur.
+     *
+     * C'est arrivé deux fois pendant l'écriture de ce module, avec
+     * `donnee()` puis `texteEcheance()`. Ce contrôle ferme la classe
+     * entière plutôt que les deux cas.
+     */
+    const core = fs.readFileSync(new URL('public/js/core.js', RACINE), 'utf8');
+    const exportes = [...core.matchAll(/^export (?:function|const|class)\s+(\w+)/gm)]
+      .map((m) => m[1]);
+    assert.ok(exportes.length > 10, 'les exports de core.js ne se lisent pas');
+
+    const coupables = [];
+    for (const f of fichiers.filter((x) => x.includes(path.join('public', 'js')))) {
+      if (f.endsWith(path.join('js', 'core.js'))) continue;
+
+      // Les commentaires sont écartés : une mention dans une explication
+      // n'est pas un appel.
+      const source = fs.readFileSync(f, 'utf8')
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/^\s*\/\/.*$/gm, '');
+      const imports = (source.match(/^import[\s\S]*?from\s+'[^']+';$/gm) ?? []).join('\n');
+      const corps = source.replace(/^import[\s\S]*?from\s+'[^']+';$/gm, '');
+
+      for (const nom of exportes) {
+        // Un appel, une lecture de propriété ou un passage en argument.
+        if (!new RegExp('\\b' + nom + '\\s*\\(').test(corps)) continue;
+        // Défini localement dans ce fichier ? Alors ce n'est pas celui-là.
+        if (new RegExp('(?:function|const|let)\\s+' + nom + '\\b').test(corps)) continue;
+        if (!new RegExp('\\b' + nom + '\\b').test(imports)) {
+          coupables.push(path.basename(f) + ' → ' + nom + '()');
+        }
+      }
+    }
+    assert.deepEqual(coupables, [], 'helpers appelés sans import : ' + coupables.join(', '));
+  });
+
   test('aucun appel à un module resté dans le socle d’origine', () => {
     const coupables = [];
     for (const f of fichiers) {
@@ -355,5 +398,113 @@ describe('Aucune trace du domaine d’origine', () => {
       }
     }
     assert.deepEqual(coupables, [], 'imports vers des fichiers absents');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+
+describe('La traduction en darija', () => {
+  const source = fs.readFileSync(new URL('public/js/i18n.js', RACINE), 'utf8');
+
+  /** Le dictionnaire, extrait du module sans le charger (il touche au DOM). */
+  const clesDuDictionnaire = () => {
+    const bloc = source.slice(source.indexOf('const ARY = {'), source.lastIndexOf('};'));
+    return [...bloc.matchAll(/^\s*(?:'([^']+)'|([A-Za-zÀ-ÿ]+)):\s*'/gm)]
+      .map((m) => m[1] ?? m[2]);
+  };
+
+  test('les deux langues sont déclarées, avec leur sens d’écriture', () => {
+    assert.match(source, /code: 'fr'.*sens: 'ltr'/s);
+    assert.match(source, /code: 'ary'.*sens: 'rtl'/s);
+  });
+
+  test('le code de langue est « ary », pas « ar »', () => {
+    // « ar » désigne l'arabe standard. Un navigateur réglé en arabe
+    // standard ne doit pas recevoir de la darija sans l'avoir demandé.
+    assert.ok(!/code: 'ar'[,\s]/.test(source), 'le code « ar » ne doit pas être utilisé');
+  });
+
+  test('aucune clé ne porte le libellé d’un type livré', () => {
+    /*
+     * C'EST LE PIÈGE QUE CE TEST FERME.
+     *
+     * Les libellés de types viennent de la base et se renomment à l'écran.
+     * Si « Vidange » figurait au dictionnaire, il serait traduit à
+     * l'affichage — et renommer ce type n'aurait plus d'effet visible tant
+     * que l'ancien nom y resterait. Le libellé d'un type est une DONNÉE.
+     */
+    const cles = new Set(clesDuDictionnaire());
+    const collisions = [...TYPES_ACTIVITE, ...TYPES_ENTRETIEN]
+      .map((t) => t.libelle)
+      .filter((libelle) => cles.has(libelle));
+    assert.deepEqual(collisions, [],
+      'libellés de types présents au dictionnaire : ' + collisions.join(', '));
+  });
+
+  test('aucun nom de rôle livré ne figure au dictionnaire', () => {
+    // Même raison : les rôles vivent en base et sont renommables.
+    const cles = new Set(clesDuDictionnaire());
+    const collisions = DEFAULT_ROLES.map((r) => r.name).filter((n) => cles.has(n));
+    assert.deepEqual(collisions, [], 'noms de rôles au dictionnaire : ' + collisions.join(', '));
+  });
+
+  test('chaque traduction est écrite en caractères arabes', () => {
+    // Une entrée laissée en français serait une traduction oubliée qui se
+    // présente comme faite : elle ne figurerait plus dans le relevé des
+    // chaînes manquantes.
+    const bloc = source.slice(source.indexOf('const ARY = {'), source.lastIndexOf('};'));
+    const sansArabe = [...bloc.matchAll(/^\s*(?:'([^']+)'|([A-Za-zÀ-ÿ]+)):\s*'([^']+)'/gm)]
+      .filter((m) => !/[؀-ۿ]/.test(m[3]))
+      .map((m) => (m[1] ?? m[2]) + ' -> ' + m[3]);
+    assert.deepEqual(sansArabe, [], 'entrées sans caractère arabe : ' + sansArabe.join(' | '));
+  });
+
+  test('la feuille de style porte les règles de droite à gauche', () => {
+    const css = fs.readFileSync(new URL('public/css/app.css', RACINE), 'utf8');
+    assert.match(css, /\[dir="rtl"\]/, 'aucune règle RTL');
+    // Les chiffres se lisent de gauche à droite même en darija.
+    assert.match(css, /\[dir="rtl"\][^{]*\.num[^{]*\{[^}]*direction: ltr/);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+
+describe('Les dates sont calendaires, pas des instants UTC', () => {
+  /*
+   * LE DÉFAUT QUE CE CONTRÔLE FERME.
+   *
+   * `today()` rendait `new Date().toISOString().slice(0, 10)`, c'est-à-dire
+   * la date UTC. Au Maroc (UTC+1), entre minuit et une heure du matin, il
+   * est déjà demain localement et encore aujourd'hui en UTC : l'activité
+   * qu'on venait de finir était refusée comme « dans le futur ».
+   *
+   * Le défaut ne se voit qu'une heure par jour — et c'est justement l'heure
+   * à laquelle une équipe de nuit saisit sa journée.
+   */
+  test('today() suit le fuseau du serveur, pas UTC', () => {
+    const source = fs.readFileSync(new URL('server/core/text.js', RACINE), 'utf8');
+    const corps = source.slice(source.indexOf('export function today()'));
+    const fin = corps.indexOf('\n}');
+    assert.ok(!/toISOString/.test(corps.slice(0, fin)),
+      'today() repasse par toISOString() : la date redevient UTC');
+    assert.match(corps.slice(0, fin), /getFullYear|toLocaleDateString/);
+  });
+
+  test('today() rend bien une date ISO valide', async () => {
+    const { today, isValidIsoDate } = await import('../server/core/text.js');
+    assert.match(today(), /^\d{4}-\d{2}-\d{2}$/);
+    assert.equal(isValidIsoDate(today()), true);
+  });
+
+  test('le déploiement pose un fuseau', () => {
+    // Un conteneur n'hérite pas du fuseau de son hôte : sans TZ, il repart
+    // en UTC, et le défaut ci-dessus revient par la porte de service.
+    for (const fichier of ['.env.example', 'Dockerfile', 'docker-compose.yml']) {
+      const contenu = fs.readFileSync(new URL(fichier, RACINE), 'utf8');
+      assert.match(contenu, /TZ[=:]\s*Africa\/Casablanca/, fichier + ' ne pose pas TZ');
+    }
+    // Alpine ne connaît aucun fuseau nommé sans tzdata : TZ y serait sans effet.
+    const dockerfile = fs.readFileSync(new URL('Dockerfile', RACINE), 'utf8');
+    assert.match(dockerfile, /apk add[^\n]*tzdata/, 'tzdata absente de l’image');
   });
 });

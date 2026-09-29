@@ -20,6 +20,8 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import fs from 'node:fs';
+import os from 'node:os';
 import pg from 'pg';
 
 const RACINE = path.resolve(fileURLToPath(new URL('../../', import.meta.url)));
@@ -88,11 +90,15 @@ export async function monterApplication({ port = 8199 } = {}) {
   const urlSource = await urlDeBase();
   const nomBase = 'flotte_test_' + Date.now().toString(36);
   const urlBase = urlAvecBase(urlSource, nomBase);
+  const dossierDonnees = fs.mkdtempSync(path.join(os.tmpdir(), 'flotte-essai-'));
 
   await executer(urlAdministration(urlSource), 'CREATE DATABASE ' + nomBase);
 
   const env = {
     NODE_ENV: 'development',
+    // Le meme fuseau que la production : sans lui, les essais qui parlent
+    // d'« aujourd'hui » tomberaient une heure par jour.
+    TZ: 'Africa/Casablanca',
     DATABASE_URL: urlBase,
     DATABASE_SSL: 'off',
     PORT: String(port),
@@ -105,9 +111,22 @@ export async function monterApplication({ port = 8199 } = {}) {
     // Large, pour que la limitation de debit ne fasse pas echouer une suite
     // qui enchaine les appels. Ce qu'elle protege est teste ailleurs.
     RATE_LIMIT_MAX: '100000',
-    // L'ancre externe ecrirait dans le dossier de donnees du projet a chaque
-    // entree : hors sujet ici, et cela laisserait des traces entre suites.
-    AUDIT_ANCRE_EXTERNE: 'false',
+
+    /*
+     * UN DOSSIER DE DONNEES A SOI, et c'est indispensable.
+     *
+     * Le dossier `data/` du projet porte l'ancre externe du journal
+     * d'audit : la tete de chaine de la base de DEVELOPPEMENT. Un serveur
+     * d'essai qui le partage confronte sa propre chaine — celle d'une base
+     * neuve, a quelques entrees — a une ancre qui en atteste quarante :
+     * la verification conclut a une alteration, et l'essai echoue en
+     * accusant un code parfaitement sain.
+     *
+     * Avec son propre dossier, l'ancre est REELLEMENT exercee : elle
+     * s'ecrit, et la verification la confronte a ce qu'elle a ecrit.
+     */
+    DATA_DIR: dossierDonnees,
+    AUDIT_ANCRE_EXTERNE: 'true',
     TRUST_PROXY: 'false',
   };
 
@@ -190,6 +209,11 @@ export async function monterApplication({ port = 8199 } = {}) {
       } catch {
         // Une base d'essai qui survit ne fait de mal a personne ; echouer
         // ici masquerait le resultat des essais eux-memes.
+      }
+      try {
+        fs.rmSync(dossierDonnees, { recursive: true, force: true });
+      } catch {
+        // Meme raison.
       }
     },
   };

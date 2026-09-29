@@ -121,6 +121,12 @@ différence entre un écran qui s'ouvre et un écran qui se charge.
 Paramètres : `du`, `au` (défaut : le mois courant), `le` (la date du jour,
 pour les essais).
 
+`compteurs` donne le nombre d'échéances par niveau — c'est ce qu'affichent les
+quatre cellules en tête d'écran. Chaque alerte porte `detail` (la phrase toute
+faite, en français) **et** `etat` (les nombres bruts) : l'écran préfère les
+nombres, parce que c'est lui qui met les mots, et lui seul sait dans quelle
+langue.
+
 ### `POST /api/activites`
 
 ```json
@@ -221,6 +227,26 @@ premières en base.
 `GET /api/fichiers/:id?inline=1` affiche l'image dans la page (miniature,
 aperçu) plutôt que de la télécharger. `inline` n'est concédé qu'aux types dont
 on sait qu'ils ne s'exécutent pas, et jamais sur la foi du nom du fichier.
+
+### `GET /api/statistiques`
+
+Mêmes filtres que la liste des activités (`du`, `au`, `vehicule`, `type`),
+plus un **découpage** :
+
+| Paramètre | Valeurs | Défaut |
+|---|---|---|
+| `granularite` | `mois`, `semaine` | `mois` |
+
+La série est rendue dans `parPeriode`, chaque ligne portant son libellé
+(`2026-09` ou `2026-S40`) et sa **date de début** — un numéro de semaine seul
+ne dit pas quand.
+
+« Combien j'ai dépensé cette semaine » et « combien ce mois-ci » sont deux
+questions différentes, et la seconde ne répond pas à la première : un mois qui
+finit bien peut cacher trois semaines mauvaises. La semaine commence le lundi
+(semaine ISO).
+
+Le reste de la réponse : `total`, `parVehicule`, `parType`.
 
 ### `PATCH /api/reglages/:cle`
 

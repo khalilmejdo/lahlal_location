@@ -11,7 +11,7 @@
  * Le bouton de suppression n'apparait donc que la ou il peut agir.
  */
 import {
-  h, fill, api, etat, icone, etatVide, chargement, saisie, liste,
+  h, donnee, fill, api, etat, icone, etatVide, chargement, saisie, liste,
   signalerErreur, succes, confirmer, modale, champ,
 } from '../core.js';
 
@@ -92,9 +92,11 @@ export async function rendre() {
     };
 
     return h('div', { class: 'ligne-champs', style: { alignItems: 'end' } },
-      champ(r.libelle, champValeur, {
+      champ(donnee(r.libelle), champValeur, {
         large: true,
-        aide: r.bornes ? 'Entre ' + r.bornes.min + ' et ' + r.bornes.max + '.' : null,
+        aide: r.bornes
+          ? h('span', {}, 'Entre ', donnee(r.bornes.min), ' et ', donnee(r.bornes.max), '.')
+          : null,
       }),
       modifiable
         ? h('button', { class: 'bouton', onclick: enregistrer }, 'Enregistrer')
@@ -123,14 +125,15 @@ export async function rendre() {
         h('th', {}, 'État'),
         h('th', {}, ''))),
       h('tbody', {}, ...types.map((t) => h('tr', {},
-        h('td', {}, t.libelle),
-        h('td', {}, h('code', {}, t.code)),
-        domaine === 'ACTIVITE' ? h('td', {}, libelleSens(t.sens)) : null,
-        h('td', { class: 'num' }, String(t.usages)),
-        h('td', {}, t.actif
+        h('td', { dataset: { libelle: 'Libellé' } }, donnee(t.libelle)),
+        h('td', { dataset: { libelle: 'Code' } }, h('code', {}, donnee(t.code))),
+        domaine === 'ACTIVITE'
+          ? h('td', { dataset: { libelle: 'Oriente vers' } }, libelleSens(t.sens)) : null,
+        h('td', { class: 'num', dataset: { libelle: 'Usages' } }, String(t.usages)),
+        h('td', { dataset: { libelle: 'État' } }, t.actif
           ? h('span', { class: 'pastille succes' }, 'Actif')
           : h('span', { class: 'pastille' }, 'Désactivé')),
-        h('td', {}, etat.peut('settings.edit')
+        h('td', { class: 'actions' }, etat.peut('settings.edit')
           ? h('div', { class: 'groupe-boutons' },
             h('button', {
               class: 'bouton petit',

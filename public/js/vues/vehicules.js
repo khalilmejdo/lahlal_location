@@ -9,7 +9,7 @@
  * appartient a la fiche.
  */
 import {
-  h, fill, api, etat, icone, montant, montantSigne, dateFr, km, entier,
+  h, donnee, donneeIsolee, texteEcheance, fill, api, etat, icone, montant, montantSigne, dateFr, km, entier,
   etatVide, pastilleNiveau, chargement, modale, champ, saisie, liste, zoneTexte,
   signalerErreur, succes, demanderMotif, confirmer, tuile, rangeeChiffres,
 } from '../core.js';
@@ -81,16 +81,17 @@ async function listeVehicules() {
   },
   h('div', { class: 'carte-corps' },
     h('div', { class: 'echeance-tete' },
-      h('strong', {}, v.nom),
+      h('strong', {}, donneeIsolee(v.nom)),
       v.archive ? h('span', { class: 'pastille' }, 'Archivé') : pastilleNiveau(v.niveau)),
     h('p', { class: 'ligne-note' },
-      v.immatriculation +
-      (v.marque ? ' · ' + v.marque : '') + (v.modele ? ' ' + v.modele : '') +
-      ' · ' + libelleStatut(v.statut)),
-    h('p', {}, icone('compteur'), h('span', {}, ' ' + km(v.kilometrage))),
+      donneeIsolee(v.immatriculation +
+        (v.marque ? ' · ' + v.marque : '') + (v.modele ? ' ' + v.modele : '')),
+      ' · ', libelleStatut(v.statut)),
+    h('p', {}, icone('compteur'), h('span', {}, donneeIsolee(' ' + km(v.kilometrage)))),
     v.prochaineEcheance
       ? h('p', { class: 'echeance-detail' },
-        v.prochaineEcheance.libelle + ' : ' + (v.prochaineEcheance.detail || ''))
+        donneeIsolee(v.prochaineEcheance.libelle), ' : ',
+        texteEcheance(v.prochaineEcheance.etat) ?? donneeIsolee(v.prochaineEcheance.detail || ''))
       : h('p', { class: 'ligne-note' }, 'Aucune échéance suivie.')));
 
   fill(racine,
@@ -138,13 +139,13 @@ async function fiche(id) {
         h('div', {},
           h('button', { class: 'bouton sourdine petit', onclick: () => aller('vehicules') },
             icone('retour'), h('span', {}, 'Véhicules')),
-          h('h1', {}, v.nom),
+          h('h1', {}, donneeIsolee(v.nom)),
           h('p', {},
-            v.immatriculation +
-            (v.marque ? ' · ' + v.marque : '') + (v.modele ? ' ' + v.modele : '') +
-            (v.annee ? ' · ' + v.annee : '') +
-            ' · ' + libelleStatut(v.statut) +
-            (v.archive ? ' · archivé' : ''))),
+            donneeIsolee(v.immatriculation +
+              (v.marque ? ' · ' + v.marque : '') + (v.modele ? ' ' + v.modele : '') +
+              (v.annee ? ' · ' + v.annee : '')),
+            ' · ', libelleStatut(v.statut),
+            v.archive ? ' · archivé' : '')),
         h('div', { class: 'page-actions' },
           etat.peut('activity.create') && !v.archive
             ? h('button', {
@@ -185,7 +186,7 @@ async function fiche(id) {
       blocPieces(v),
       v.notes ? h('section', { class: 'carte' },
         h('div', { class: 'carte-entete' }, h('h2', {}, 'Notes')),
-        h('div', { class: 'carte-corps' }, h('p', {}, v.notes))) : null);
+        h('div', { class: 'carte-corps' }, h('p', {}, donnee(v.notes)))) : null);
   }
 
   relire();
@@ -234,7 +235,7 @@ function ligneEcheance(e, v, relire) {
 
   return h('div', { class: 'echeance niveau-' + e.etat.niveau },
     h('div', { class: 'echeance-tete' },
-      h('span', { class: 'echeance-titre' }, e.libelle),
+      h('span', { class: 'echeance-titre' }, donneeIsolee(e.libelle)),
       h('span', {},
         pastilleNiveau(e.etat.niveau),
         etat.peut('maintenance.close') && !v.archive && e.etat.surveille
@@ -249,9 +250,9 @@ function ligneEcheance(e, v, relire) {
           }, 'Effectué')
           : null)),
     h('span', { class: 'echeance-detail' },
-      e.alerte?.detail || 'Pas d’échéance exploitable.',
-      e.derniereDate ? ' · dernière fois le ' + dateFr(e.derniereDate) : '',
-      e.dernierKm != null ? ' à ' + entier(e.dernierKm) + ' km' : ''),
+      texteEcheance(e.etat) ?? 'Pas d’échéance exploitable.',
+      e.derniereDate ? h('span', {}, ' · dernière fois le ', donnee(dateFr(e.derniereDate))) : '',
+      e.dernierKm != null ? donnee(' à ' + entier(e.dernierKm) + ' km') : ''),
     e.etat.surveille
       ? h('div', { class: 'echeance-piste' },
         h('div', { class: 'echeance-remplissage', style: { width: Math.round(avancement * 100) + '%' } }))
@@ -270,11 +271,11 @@ function blocTimeline(activites, pagination) {
         ? h('div', { class: 'chronologie' }, ...activites.map((a) =>
           h('div', { class: 'chrono-entree ' + (a.resultatCents < 0 ? 'warning' : 'notice') },
             h('div', { class: 'quand' },
-              dateFr(a.date) + ' · ' + a.typeLibelle +
-              (a.nbPieces ? ' · ' + a.nbPieces + ' pièce(s)' : '')),
+              donneeIsolee(dateFr(a.date) + ' · ' + a.typeLibelle),
+              a.nbPieces ? ' · ' + a.nbPieces + ' pièce(s)' : ''),
             h('div', { class: 'quoi' },
-              a.prestation,
-              a.kilometrage != null ? ' — ' + km(a.kilometrage) : '',
+              donneeIsolee(a.prestation),
+              a.kilometrage != null ? donneeIsolee(' — ' + km(a.kilometrage)) : '',
               ' — ',
               h('span', { class: a.resultatCents < 0 ? 'resultat-negatif' : 'resultat-positif' },
                 montantSigne(a.resultatCents))),

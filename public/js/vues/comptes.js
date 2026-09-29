@@ -10,7 +10,7 @@
  * on perdrait le mot de passe en regardant ailleurs.
  */
 import {
-  h, fill, api, etat, icone, dateHeureFr, etatVide, chargement,
+  h, donnee, fill, api, etat, icone, dateHeureFr, etatVide, chargement,
   modale, champ, saisie, liste, signalerErreur, succes, confirmer,
 } from '../core.js';
 
@@ -44,18 +44,19 @@ export async function rendre() {
           h('th', {}, 'Dernière connexion'),
           h('th', {}, ''))),
         h('tbody', {}, ...comptes.map((c) => h('tr', {},
-          h('td', {}, h('code', {}, c.username)),
-          h('td', {}, c.fullName),
-          h('td', {}, c.role.name),
-          h('td', {},
+          h('td', { dataset: { libelle: 'Identifiant' } }, h('code', {}, donnee(c.username))),
+          h('td', { dataset: { libelle: 'Nom' } }, donnee(c.fullName)),
+          h('td', { dataset: { libelle: 'Rôle' } }, donnee(c.role.name)),
+          h('td', { dataset: { libelle: 'État' } },
             c.actif
               ? h('span', { class: 'pastille succes' }, 'Actif')
               : h('span', { class: 'pastille danger' }, 'Désactivé'),
             c.doitChangerMotDePasse
               ? h('span', { class: 'pastille attente' }, 'Mot de passe à changer')
               : null),
-          h('td', {}, c.derniereConnexion ? dateHeureFr(c.derniereConnexion) : 'jamais'),
-          h('td', {}, etat.peut('user.manage') && peutAgir(c)
+          h('td', { dataset: { libelle: 'Dernière connexion' } },
+            c.derniereConnexion ? dateHeureFr(c.derniereConnexion) : 'jamais'),
+          h('td', { class: 'actions' }, etat.peut('user.manage') && peutAgir(c)
             ? h('div', { class: 'groupe-boutons' },
               h('button', {
                 class: 'bouton petit', title: 'Modifier',
@@ -84,13 +85,14 @@ export async function rendre() {
             h('th', { class: 'num' }, 'Comptes'), h('th', { class: 'num' }, 'Droits'),
             h('th', {}, ''))),
           h('tbody', {}, ...donnees.roles.map((r) => h('tr', {},
-            h('td', {}, h('strong', {}, r.name),
-              h('div', { class: 'ligne-note' }, r.description),
+            h('td', { dataset: { libelle: 'Rôle' } }, h('strong', {}, donnee(r.name)),
+              h('div', { class: 'ligne-note' }, donnee(r.description)),
               r.personnalise ? h('span', { class: 'pastille info' }, 'Droits redéfinis') : null),
-            h('td', { class: 'num' }, String(r.rank)),
-            h('td', { class: 'num' }, String(r.nbComptes)),
-            h('td', { class: 'num' }, r.code === 'SUPERADMIN' ? 'tous' : String(r.permissions.length)),
-            h('td', {},
+            h('td', { class: 'num', dataset: { libelle: 'Rang' } }, String(r.rank)),
+            h('td', { class: 'num', dataset: { libelle: 'Comptes' } }, String(r.nbComptes)),
+            h('td', { class: 'num', dataset: { libelle: 'Droits' } },
+              r.code === 'SUPERADMIN' ? 'tous' : String(r.permissions.length)),
+            h('td', { class: 'actions' },
               etat.peut('role.manage') && r.code !== 'SUPERADMIN'
                 ? h('button', {
                   class: 'bouton petit',
@@ -111,7 +113,7 @@ export async function rendre() {
     // On ne propose que les roles sur lesquels on a autorite.
     const monRang = etat.utilisateur.role?.rank ?? 999;
     const choix = roles.filter((r) => r.rank > monRang)
-      .map((r) => ({ value: r.id, label: r.name }));
+      .map((r) => ({ value: r.id, label: donnee(r.name) }));
     const champRole = liste(choix, existant?.role?.id ?? choix[0]?.value);
     const champActif = h('input', { type: 'checkbox', checked: existant ? existant.actif : true });
     const avis = h('p', { class: 'ligne-note', role: 'alert' });

@@ -1550,3 +1550,216 @@ body.modale-ouverte .bouton-nouvelle-activite { display: none; }
 .choix-type .bouton.actif {
   background: var(--accent-doux); color: var(--accent); border-color: var(--accent);
 }
+
+/* ==================================================================== */
+/*  Téléphone : l'usage principal                                       */
+/* ==================================================================== */
+/*
+ * L'application se tient d'une main, dehors, souvent au soleil. Trois
+ * changements en decoulent, et ils ne sont pas cosmetiques.
+ *
+ *   1. La navigation descend SOUS LE POUCE. Un tiroir derriere un menu
+ *      hamburger, en haut a gauche, est le coin le plus difficile a
+ *      atteindre d'un ecran de six pouces tenu d'une main.
+ *   2. Les tableaux deviennent des CARTES. Onze colonnes qui defilent
+ *      horizontalement ne se lisent pas : on perd la colonne de gauche des
+ *      qu'on cherche le montant.
+ *   3. Les cibles font QUARANTE-QUATRE PIXELS au moins. En dessous, on
+ *      touche a cote, et l'on corrige — ce qui coute plus de temps que la
+ *      place gagnee.
+ */
+
+.onglets-bas { display: none; }
+
+@media (max-width: 720px) {
+
+  /* ---- La barre d'onglets ---- */
+
+  .onglets-bas {
+    position: fixed; inset-inline: 0; inset-block-end: 0; z-index: 50;
+    display: flex; justify-content: space-around; align-items: stretch;
+    background: var(--rail-fond, var(--surface));
+    border-top: 1px solid var(--rail-trait, var(--trait));
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    /* Le contenu qui passe dessous reste lisible au travers. */
+    backdrop-filter: blur(8px);
+  }
+  .onglet-bas {
+    flex: 1; min-width: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 3px; padding: 8px 4px 7px; min-height: 56px;
+    border: 0; background: transparent; cursor: pointer;
+    color: var(--rail-encre, var(--encre-faible));
+    font-family: inherit; font-size: 10.5px; font-weight: 600;
+    text-decoration: none; text-align: center;
+    -webkit-tap-highlight-color: transparent;
+    transition: color var(--transition);
+  }
+  .onglet-bas span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+  .onglet-bas.actif { color: var(--accent); }
+  /* Un trait au-dessus de l'onglet actif : la couleur seule ne suffit pas
+     a qui distingue mal le rouge du gris. */
+  .onglet-bas.actif::before {
+    content: ""; position: absolute; inset-block-start: 0;
+    width: 30px; height: 2px; border-radius: 0 0 2px 2px; background: var(--accent);
+  }
+  .onglet-bas { position: relative; }
+
+  /* Le menu hamburger n'a plus de raison d'etre : la barre basse porte les
+     quatre destinations, et « Plus » ouvre le rail pour le reste. */
+  .bouton-menu { display: none; }
+
+  /* Ce qui defile doit depasser la barre ET le bouton flottant. Sans cette
+     marge, le bouton recouvre les actions de la derniere carte — et l'on
+     touche « supprimer » en croyant toucher « nouvelle activite ». */
+  .contenu { padding-bottom: calc(136px + env(safe-area-inset-bottom, 0px)); }
+
+  /* Le bouton flottant se pose AU-DESSUS de la barre, pas dessus. */
+  .bouton-nouvelle-activite {
+    inset-block-end: calc(70px + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* ---- Les indicateurs : deux par ligne ---- */
+  /*
+   * Un par ligne obligeait a defiler sur quatre ecrans pour lire quatre
+   * nombres. Deux par ligne les donnent d'un coup d'oeil, et le chiffre
+   * reste assez grand pour se lire a bout de bras.
+   */
+  .grille.c2, .grille.c3, .grille.c4 { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .chiffres .tuile { padding: 13px 14px; }
+  .chiffres .tuile .valeur { font-size: 21px; }
+  .chiffres .tuile .etiquette { font-size: 9.5px; letter-spacing: .4px; }
+
+  /* ---- Les tableaux deviennent des cartes ---- */
+
+  table.donnees thead { display: none; }
+  table.donnees, table.donnees tbody, table.donnees tr, table.donnees td { display: block; width: 100%; }
+  .table-enveloppe { overflow-x: visible; }
+
+  table.donnees tbody tr {
+    border: 1px solid var(--carte-trait); border-radius: var(--rayon-l);
+    margin: 0 0 10px; padding: 11px 13px; background: var(--surface);
+  }
+  table.donnees tbody tr:last-child { margin-bottom: 0; }
+  table.donnees tbody tr:hover { background: var(--surface); }
+
+  table.donnees tbody td {
+    border: 0; padding: 3px 0;
+    display: flex; align-items: baseline; justify-content: space-between; gap: 14px;
+    text-align: right;
+  }
+  /* L'en-tete de colonne revient devant la valeur : sans lui, une carte
+     n'est qu'une pile de nombres sans nom. */
+  table.donnees tbody td::before {
+    content: attr(data-libelle);
+    flex: 0 0 auto; text-align: left;
+    font-size: 10.5px; font-weight: 650; text-transform: uppercase; letter-spacing: .5px;
+    color: var(--encre-faible);
+  }
+  /* Une cellule vide ne merite pas sa ligne. */
+  table.donnees tbody td:empty { display: none; }
+  /* La cellule d'actions ne porte pas d'etiquette et prend la largeur. */
+  table.donnees tbody td.actions::before { content: none; }
+  table.donnees tbody td.actions { justify-content: flex-end; padding-top: 8px; }
+
+  /* ---- Cibles au doigt ---- */
+
+  .bouton { min-height: 40px; }
+  .bouton.petit { min-height: 36px; padding-inline: 12px; }
+  .groupe-boutons .bouton, .choix-type .bouton { min-height: 38px; }
+  .saisie { min-height: 44px; font-size: 16px; } /* 16 px : iOS ne zoome pas */
+  select.saisie { min-height: 44px; }
+  .case { min-height: 40px; display: flex; align-items: center; gap: 9px; }
+  .case input[type="checkbox"] { width: 20px; height: 20px; }
+
+  /* ---- Respiration ---- */
+
+  .page-entete { flex-direction: column; align-items: stretch; gap: 10px; }
+  .page-entete h1 { font-size: 21px; }
+  .page-actions { flex-wrap: wrap; }
+  .page-actions .bouton { flex: 1 1 auto; justify-content: center; }
+  .carte-corps { padding: 14px 15px 16px; }
+  .filtres { padding: 12px 14px 14px; gap: 8px; }
+  .filtres .champ { min-width: 0; flex: 1 1 46%; }
+  .filtres .champ.large { flex: 1 1 100%; }
+}
+
+/* Très petits écrans : les indicateurs repassent à une colonne plutôt que
+   de couper « 1 330,00 DH » en deux lignes. */
+@media (max-width: 360px) {
+  .grille.c2, .grille.c3, .grille.c4 { grid-template-columns: 1fr; }
+}
+
+/* Une tuile qui s'ouvre : elle doit se voir cliquable, sans crier. */
+.tuile-cliquable { cursor: pointer; }
+.tuile-cliquable:hover { filter: brightness(1.05); }
+.tuile-cliquable:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ==================================================================== */
+/*  Écriture de droite à gauche                                         */
+/* ==================================================================== */
+/*
+ * L'essentiel de la mise en page est deja logique — flex, grid,
+ * inset-inline, padding-inline — et se retourne seul. Ne restent que les
+ * endroits ou une direction PHYSIQUE etait ecrite en dur, et les chiffres,
+ * qui se lisent de gauche a droite meme en darija : « 152 300 km » ne
+ * devient pas « km 300 152 ».
+ */
+
+[dir="rtl"] .chiffres,
+[dir="rtl"] .graphe-graduation,
+[dir="rtl"] td.num,
+[dir="rtl"] th.num,
+[dir="rtl"] .num { direction: ltr; }
+
+[dir="rtl"] table.donnees th,
+[dir="rtl"] table.donnees td { text-align: right; }
+[dir="rtl"] table.donnees th.num,
+[dir="rtl"] table.donnees td.num { text-align: left; }
+
+/* Un graphique se lit dans le sens du temps, et le temps ne se retourne
+   pas : la serie garde son ordre, les etiquettes avec elle. */
+[dir="rtl"] .graphe-cadre,
+[dir="rtl"] .graphe-libelles,
+[dir="rtl"] .graphe-pied { direction: ltr; }
+
+[dir="rtl"] .carte-utilisateur .nom,
+[dir="rtl"] .carte-utilisateur .role { text-align: right; }
+
+/* Le lisere d'etat d'une carte passe de l'autre cote. */
+[dir="rtl"] .carte.niveau-ATTENTION,
+[dir="rtl"] .carte.niveau-URGENT,
+[dir="rtl"] .carte.niveau-DEPASSE {
+  border-left: 0;
+  border-right: 3px solid var(--teinte-carte, var(--trait));
+}
+[dir="rtl"] .carte.niveau-ATTENTION { --teinte-carte: var(--attente); }
+[dir="rtl"] .carte.niveau-URGENT    { --teinte-carte: var(--accent); }
+[dir="rtl"] .carte.niveau-DEPASSE   { --teinte-carte: var(--danger); }
+
+[dir="rtl"] .encadre {
+  border-left: 0;
+  border-right: 3px solid var(--teinte, var(--info));
+}
+
+/* La chronologie : le fil et ses pastilles passent a droite. */
+[dir="rtl"] .chronologie { padding-left: 0; padding-right: 22px; }
+[dir="rtl"] .chronologie::before { left: auto; right: 5px; }
+[dir="rtl"] .chrono-entree::before { left: auto; right: -21px; }
+
+/* Une donnee isolee de son sens d'ecriture : une immatriculation latine
+   au milieu d'une phrase en darija ne doit pas se faire reordonner. */
+bdi { unicode-bidi: isolate; }
+
+/* Le selecteur de langue, dans le pied du rail, a cote du theme. */
+.rail-affichage { display: flex; align-items: center; gap: 6px; }
+.rail-affichage .bouton-rail { flex: 1; min-width: 0; }
+.rail-langue {
+  flex-shrink: 0; max-width: 112px;
+  padding: 7px 8px; border-radius: var(--rayon-s);
+  border: 1px solid var(--rail-trait); background: rgba(255, 255, 255, .06);
+  color: var(--rail-encre); font-family: inherit; font-size: 12.5px; cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+.rail-langue:hover { background: var(--rail-actif, rgba(255,255,255,.12)); color: var(--rail-encre-vive); }
+.rail-langue option { color: var(--encre); background: var(--surface); }

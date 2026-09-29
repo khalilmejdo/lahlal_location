@@ -12,7 +12,7 @@
  * prononce — le nombre compte autant que le verdict.
  */
 import {
-  h, fill, api, dateHeureFr, etatVide, chargement, saisie, liste,
+  h, donnee, donneeIsolee, fill, api, dateHeureFr, etatVide, chargement, saisie, liste,
   signalerErreur, succes, montant,
 } from '../core.js';
 
@@ -61,10 +61,10 @@ export async function rendre({ parametres }) {
         h('div', { class: 'carte-corps' },
           h('div', { class: 'chronologie' }, ...entrees.map(entree))),
         h('div', { class: 'pagination' },
-          h('span', { class: 'info' },
-            'Entrées ' + (pagination.offset + 1) + ' à ' +
-            Math.min(pagination.offset + pagination.limit, pagination.total) +
-            ' sur ' + pagination.total),
+          h('span', { class: 'info' }, 'Entrées ',
+            donnee((pagination.offset + 1) + ' à ' +
+              Math.min(pagination.offset + pagination.limit, pagination.total)),
+            ' sur ', donnee(pagination.total)),
           h('div', { class: 'groupe-boutons' },
             h('button', {
               class: 'bouton petit', disabled: pagination.offset === 0,
@@ -79,17 +79,17 @@ export async function rendre({ parametres }) {
 
   const entree = (e) => h('div', { class: 'chrono-entree ' + (CLASSE[e.severite] ?? '') },
     h('div', { class: 'quand' },
-      dateHeureFr(e.le) + ' · ' + e.action + (e.ip ? ' · ' + e.ip : '')),
-    h('div', { class: 'quoi' }, e.resume),
-    h('div', { class: 'qui' }, e.par || 'système'),
+      donneeIsolee(dateHeureFr(e.le) + ' · ' + e.action + (e.ip ? ' · ' + e.ip : ''))),
+    h('div', { class: 'quoi' }, donneeIsolee(e.resume)),
+    h('div', { class: 'qui' }, donnee(e.par || 'système')),
     e.changements ? diff(e.changements) : null);
 
   const diff = (changements) => h('div', { class: 'chrono-diff' },
     ...Object.entries(changements).map(([cle, v]) => h('div', { class: 'champ-diff' },
-      h('span', { class: 'cle' }, cle),
-      h('span', { class: 'avant' }, valeur(cle, v?.from)),
+      h('span', { class: 'cle' }, donnee(cle)),
+      h('span', { class: 'avant' }, donnee(valeur(cle, v?.from))),
       h('span', {}, '→'),
-      h('span', { class: 'apres' }, valeur(cle, v?.to)))));
+      h('span', { class: 'apres' }, donnee(valeur(cle, v?.to))))));
 
   /** Un montant en centimes se lit en dirhams, pas en entier brut. */
   const valeur = (cle, v) => {

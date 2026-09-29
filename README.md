@@ -143,6 +143,109 @@ familles ont été reprises telles quelles, ou adaptées :
 
 ---
 
+## Deux langues : français et darija
+
+L'interface se met en **darija marocaine**, en caractères arabes et de droite
+à gauche. Le choix se fait dans le pied du menu, à côté du thème, et il est
+retenu par navigateur.
+
+C'est la langue parlée, écrite comme elle s'écrit ici — « الطوموبيل » et non
+« المركبة », « الفيدانج » et non « تغيير الزيت ». Le code de langue est `ary`
+(arabe marocain), pas `ar` : un navigateur réglé en arabe standard ne reçoit
+pas de la darija sans l'avoir demandé.
+
+**Aucun service tiers.** Le widget de Google Traduction est exclu pour deux
+raisons : la politique de sécurité du contenu interdit tout script d'une autre
+origine, et le widget enverrait chez un tiers le contenu de chaque page —
+immatriculations, montants, notes. Le dictionnaire vit dans
+[`public/js/i18n.js`](public/js/i18n.js), indexé par la chaîne française
+elle-même. Une chaîne non traduite reste lisible en français ; jamais vide,
+jamais `MISSING_KEY`.
+
+### Ce qui se traduit, et ce qui ne se traduit pas
+
+| | |
+|---|---|
+| L'interface — menus, boutons, étiquettes, messages | **traduit** |
+| Ce que vous avez écrit — prestations, notes, noms de véhicules | **jamais** |
+| Les libellés de types et de rôles | **jamais** — ils vivent en base |
+| Les nombres, montants, dates, immatriculations | affichés tels quels, en lecture gauche-droite |
+
+Les libellés de types (« Vidange », « Carburant »…) viennent de la base et se
+renomment depuis **Paramètres → Types**. C'est là que vous les mettrez en
+darija, et ce sera votre texte — pas une traduction figée dans le code. Un
+test vérifie qu'aucun d'eux n'a été glissé dans le dictionnaire.
+
+La barrière technique est `donnee()` : elle rend un nœud de texte que le
+traducteur laisse passer intact. `donneeIsolee()` fait de même dans un
+`<bdi>`, pour qu'une immatriculation latine posée au milieu d'une ligne arabe
+ne se fasse pas réordonner en « A-56 · … · 1234 ».
+
+**Ce qui reste en français aujourd'hui** : les résumés du journal d'audit et
+les messages d'erreur du serveur. Ce sont des phrases construites côté
+serveur ; les traduire demanderait d'internationaliser le serveur, ce qui n'a
+pas été fait. Le compte à rebours des échéances, lui, a été rapatrié côté
+écran précisément pour cette raison — c'est le texte le plus visible de
+l'application.
+
+Pour savoir ce qu'il reste à traduire, ouvrez la console du navigateur en
+darija et tapez `chainesManquantes()`.
+
+---
+
+## Pensé pour le téléphone
+
+C'est l'usage principal : l'application se tient d'une main, dehors.
+
+- **La navigation est en bas**, sous le pouce — quatre destinations et un
+  « Plus ». Un tiroir derrière un menu hamburger, en haut à gauche, est le
+  coin le plus difficile à atteindre d'un écran de six pouces tenu d'une main.
+  Au-delà de 720 px, le rail latéral reprend la main.
+- **Les tableaux deviennent des cartes.** Onze colonnes qui défilent
+  horizontalement ne se lisent pas : on perd la colonne de gauche dès qu'on
+  cherche le montant. Chaque cellule affiche l'en-tête de sa colonne devant
+  sa valeur.
+- **Les indicateurs vont par deux**, pas un par ligne : quatre nombres d'un
+  coup d'œil au lieu de quatre écrans de défilement.
+- **Les cibles font 44 px au moins**, et les champs de saisie 16 px de police
+  — en dessous, iOS zoome tout seul à chaque fois qu'on touche un champ.
+- **Le formulaire d'activité prend l'écran entier**, et le bouton
+  « Enregistrer » tient la largeur, en bas.
+- Le bouton **« Nouvelle activité » est présent partout**, flottant, au-dessus
+  de la barre système des téléphones à encoche.
+
+### Enregistrer une activité, en pratique
+
+Le formulaire s'ouvre sur **le véhicule et le type de la dernière saisie** :
+dans une journée, on enregistre plusieurs fois la même chose avec le même
+camion. Le curseur se pose sur le montant — c'est ce qui reste à taper.
+
+La **prestation est facultative** : laissée vide, elle reprend le libellé du
+type. « Carburant, 400 DH » est une saisie complète et honnête ; exiger en
+plus d'écrire « Carburant » dans une case ne documente rien.
+
+Le **résultat s'affiche pendant la frappe** : « Dépense 50, recette 250 »
+montre « +200,00 DH » avant d'enregistrer, ce qui permet de voir une faute au
+moment où on la fait. La note est repliée derrière un bouton — elle sert une
+fois sur vingt.
+
+### Les photos
+
+« Prendre une photo » ouvre l'appareil et en rend **une**. C'est le système
+qui le décide : l'attribut `multiple` est posé, mais `capture` prend le dessus
+sur téléphone, et aucun attribut ne change cela.
+
+Ce qui est possible, c'est d'enchaîner : après le premier cliché, le bouton
+devient **« Prendre une autre photo »** et reste exactement où le pouce l'a
+laissé. Trois factures et un compteur se photographient en quatre appuis, sans
+quitter le formulaire. « Choisir un fichier » accepte, lui, une sélection
+multiple depuis la galerie, PDF compris.
+
+Les images sont **réduites avant l'envoi** (1 600 px, JPEG 82 %) : une photo
+de 5 Mo en pèse quelques centaines de kilo-octets.
+
+---
+
 ## Les quatre décisions qui structurent le module
 
 ### 1. Le kilométrage d'un véhicule est déduit, jamais écrit

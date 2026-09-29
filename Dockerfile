@@ -31,7 +31,9 @@ FROM node:24-alpine AS production
 # L'etat imprimable d'un vehicule est du HTML que le navigateur enregistre
 # en PDF (server/routes/exports.js) — un moteur de rendu de plus dans
 # l'image ne servirait a rien.
-RUN apk add --no-cache tini
+# tzdata : sans elle, Alpine ne connait aucun fuseau nomme, et TZ reste
+# sans effet — le conteneur repart en UTC sans le dire.
+RUN apk add --no-cache tini tzdata
 
 # Empreinte du commit construit. Coolify la fournit en argument de build ;
 # sans elle, rien ne distingue une image deployee d'une image restee en
@@ -39,9 +41,13 @@ RUN apk add --no-cache tini
 # chaine de livraison.
 ARG SOURCE_COMMIT=""
 
+# TZ : les dates de ce module sont des dates CALENDAIRES. Sans lui, le
+# conteneur tourne en UTC et, au Maroc, l'activite saisie apres minuit est
+# refusee comme etant dans le futur. Il se surcharge au deploiement.
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=3000 \
+    TZ=Africa/Casablanca \
     SOURCE_COMMIT=${SOURCE_COMMIT}
 
 WORKDIR /app

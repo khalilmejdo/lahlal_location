@@ -13,9 +13,20 @@
  * prestation, une note ou un nom de fichier puisse devenir du balisage.
  */
 
+import { t, noterManquante } from './i18n.js';
+
 /* ================================================================== */
 /*  1. Construction du DOM                                             */
 /* ================================================================== */
+
+/**
+ * Attributs dont le contenu s'affiche, et se traduit donc.
+ *
+ * Les autres — « value », « name », « data-* » — portent des identifiants
+ * ou des valeurs métier : les traduire enverrait « الطوموبيل » là où le
+ * serveur attend « VEHICULE ».
+ */
+const ATTRIBUTS_TRADUITS = new Set(['placeholder', 'title', 'aria-label', 'alt']);
 
 export function h(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
@@ -28,6 +39,9 @@ export function h(tag, attrs = {}, ...children) {
     else if (key === 'style' && typeof value === 'object') Object.assign(node.style, value);
     else if (key.startsWith('on') && typeof value === 'function') {
       node.addEventListener(key.slice(2).toLowerCase(), value);
+    } else if (ATTRIBUTS_TRADUITS.has(key)) {
+      noterManquante(value);
+      node.setAttribute(key, t(String(value)));
     } else if (key === 'value' && (tag === 'textarea' || tag === 'select')) {
       // Un <textarea> n'a pas d'attribut « value » : son contenu est son
       // texte, et le poser en attribut laisse le champ vide sans erreur —
@@ -43,12 +57,60 @@ export function h(tag, attrs = {}, ...children) {
   return node;
 }
 
+/**
+ * Ajoute des enfants, en traduisant le texte au passage.
+ *
+ * C'est l'UNIQUE endroit où une chaîne devient visible : rien n'est inséré
+ * via innerHTML dans cette application. Traduire ici suffit donc à traduire
+ * toute l'interface, sans réécrire un seul écran.
+ */
 function append(node, children) {
   for (const child of children.flat(4)) {
     if (child === null || child === undefined || child === false || child === '') continue;
     if (child instanceof Node) { node.append(child); continue; }
-    node.append(document.createTextNode(String(child)));
+    const brut = String(child);
+    noterManquante(brut);
+    node.append(document.createTextNode(t(brut)));
   }
+}
+
+/**
+ * Du texte qui est une DONNÉE, et non un libellé d'interface.
+ *
+ * Toute chaîne passée à `h()` ou `fill()` traverse le traducteur. C'est
+ * juste pour un libellé — c'est même tout l'objet de la fonction — et faux
+ * pour ce qu'un utilisateur a écrit. Une prestation nommée « Vidange », un
+ * véhicule appelé « Location », une note d'exploitation : si le texte
+ * coïncide avec une entrée du dictionnaire, il est REMPLACÉ, et la personne
+ * qui relit sa propre saisie ne lit plus ce qu'elle a écrit.
+ *
+ * Rendre un nœud de texte suffit : `append()` laisse passer un Node sans y
+ * toucher. C'est le correctif O-3 de lahlal_samuplus, repris ici avant que
+ * le défaut n'existe.
+ */
+export function donnee(valeur) {
+  return document.createTextNode(valeur === null || valeur === undefined ? '' : String(valeur));
+}
+
+/**
+ * Une donnée affichée DANS LE FIL D'UNE PHRASE, isolée de son sens
+ * d'écriture.
+ *
+ * En darija, la page se lit de droite à gauche, et le navigateur réordonne
+ * ce qu'il ne sait pas rattacher : l'immatriculation « 1234-A-56 » posée au
+ * milieu d'une ligne arabe ressort « A-56 · … · 1234 », et une date
+ * « 29/09/2026 » se disloque de la même façon. Constaté sur la fiche d'un
+ * véhicule rendue par Chrome.
+ *
+ * `<bdi>` est l'élément prévu pour un texte dont on ne connaît pas le sens :
+ * il le lit selon ses propres caractères, sans rien changer à une page de
+ * gauche à droite. Il est en ligne — il ne déplace rien.
+ *
+ * `donnee()` reste un simple nœud de texte : elle sert là où un élément
+ * n'est pas admis, à commencer par le contenu d'un `<option>`.
+ */
+export function donneeIsolee(valeur) {
+  return h('bdi', {}, donnee(valeur));
 }
 
 /** Remplace le contenu d'un element. */
@@ -607,10 +669,64 @@ export function pastilleNiveau(niveau, texte) {
 }
 
 /**
- * Un tableau, avec son enveloppe de defilement.
+ * Le compte à rebours d'une échéance, mis en mots (§14, §36).
  *
- * L'enveloppe n'est pas decorative : sur telephone, un tableau de onze
- * colonnes doit pouvoir glisser horizontalement sans emporter la page.
+ * LA FORMULATION VIT ICI, PAS SUR LE SERVEUR.
+ *
+ * Le serveur rend des NOMBRES — kilomètres restants, jours restants — et
+ * le niveau qui en découle. C'est lui qui sait comparer une échéance à un
+ * compteur ; ce n'est pas à lui de choisir les mots. Tant que l'application
+ * ne parlait que français, la différence ne se voyait pas : en darija, un
+ * « Dépassée de 4 300 km » venu du serveur restait français au milieu d'un
+ * écran arabe.
+ *
+ * Le serveur garde ses propres textes pour l'état imprimable, qui est un
+ * document français destiné à être classé.
+ *
+ * @param {{surveille?:boolean, km?:{restant:number}, date?:{restant:number}}|null} etat
+ * @returns {Node|null} les deux axes, séparés par un point médian
+ */
+export function texteEcheance(etat) {
+  if (!etat?.surveille) return null;
+
+  const morceaux = [];
+  if (etat.km) morceaux.push(texteKilometres(etat.km.restant));
+  if (etat.date) morceaux.push(texteJours(etat.date.restant));
+  if (!morceaux.length) return null;
+
+  const ligne = h('span', {});
+  morceaux.forEach((m, i) => {
+    if (i) ligne.append(document.createTextNode(' · '));
+    ligne.append(m);
+  });
+  return ligne;
+}
+
+function texteKilometres(restant) {
+  if (restant > 0) return h('span', {}, donnee(entier(restant) + ' km'), ' restants');
+  if (restant === 0) return h('span', {}, 'Échéance atteinte');
+  return h('span', {}, 'Dépassée de ', donnee(entier(Math.abs(restant)) + ' km'));
+}
+
+function texteJours(restant) {
+  if (restant > 1) return h('span', {}, donnee(restant), ' jours restants');
+  if (restant === 1) return h('span', {}, '1 jour restant');
+  if (restant === 0) return h('span', {}, 'Échéance aujourd’hui');
+  if (restant === -1) return h('span', {}, 'Échue depuis 1 jour');
+  return h('span', {}, 'Échue depuis ', donnee(Math.abs(restant)), ' jours');
+}
+
+/**
+ * Un tableau.
+ *
+ * SUR TÉLÉPHONE, IL N'EST PLUS UN TABLEAU : chaque ligne devient une carte,
+ * et chaque cellule affiche l'en-tête de sa colonne devant sa valeur (voir
+ * la feuille de style, section « Téléphone »). C'est pourquoi chaque
+ * cellule porte `data-libelle` : sans lui, la carte ne serait qu'une pile
+ * de nombres sans nom.
+ *
+ * Le helper le pose tout seul à partir des colonnes déclarées — un écran
+ * qui construit ses lignes à la main doit y penser, lui.
  */
 export function tableau(colonnes, lignes, { vide = 'Aucune ligne.' } = {}) {
   if (!lignes.length) return etatVide(vide);
@@ -618,5 +734,15 @@ export function tableau(colonnes, lignes, { vide = 'Aucune ligne.' } = {}) {
     h('table', { class: 'donnees' },
       h('thead', {}, h('tr', {}, ...colonnes.map((c) =>
         h('th', { class: c.align === 'right' ? 'num' : null }, c.titre)))),
-      h('tbody', {}, ...lignes.map((l) => h('tr', {}, ...l)))));
+      h('tbody', {}, ...lignes.map((cellules) => h('tr', {},
+        ...cellules.map((cellule, i) => {
+          if (cellule instanceof HTMLTableCellElement) {
+            if (!cellule.dataset.libelle) cellule.dataset.libelle = colonnes[i]?.titre ?? '';
+            return cellule;
+          }
+          return h('td', {
+            class: colonnes[i]?.align === 'right' ? 'num' : null,
+            dataset: { libelle: colonnes[i]?.titre ?? '' },
+          }, cellule);
+        }))))));
 }

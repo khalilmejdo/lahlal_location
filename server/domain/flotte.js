@@ -109,8 +109,16 @@ export async function vehiculesAvecEtat({
       entretiens: siens,
       niveau: pireNiveau(...surveilles.map((e) => e.etat.niveau)),
       // Ce que la liste affiche en une ligne (§37).
+      //
+      // `etat` accompagne la phrase toute faite : il porte les nombres, et
+      // c'est a partir d'eux que l'ecran ecrit le compte a rebours dans la
+      // langue de celui qui regarde.
       prochaineEcheance: surveilles.length
-        ? { libelle: surveilles[0].libelle, ...surveilles[0].alerte }
+        ? {
+          libelle: surveilles[0].libelle,
+          ...surveilles[0].alerte,
+          etat: surveilles[0].etat,
+        }
         : null,
       compteurs: compterParNiveau(surveilles),
     };

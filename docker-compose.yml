@@ -28,6 +28,7 @@ services:
         condition: service_healthy
     environment:
       NODE_ENV: production
+      TZ: Africa/Casablanca
       PORT: 3000
       DATABASE_URL: postgresql://flotte:flotte@base:5432/flotte
       DATABASE_SSL: "off"

@@ -134,9 +134,26 @@ export function isValidIsoDate(input) {
   );
 }
 
-/** Date du jour au format ISO. */
+/**
+ * Date du jour au format ISO, DANS LE FUSEAU DU SERVEUR.
+ *
+ * Elle valait `new Date().toISOString().slice(0, 10)`, c'est-a-dire la date
+ * UTC. Le defaut que cela produit ne se voit qu'une heure par jour, et il
+ * est total : au Maroc (UTC+1), entre minuit et une heure du matin, il est
+ * deja demain localement et encore aujourd'hui en UTC. Une activite
+ * enregistree a 00 h 30 portait donc une date que le serveur declarait
+ * « dans le futur », et le refus etait sec — impossible de saisir la course
+ * qu'on vient de finir.
+ *
+ * Toutes les dates de ce module sont des dates CALENDAIRES, pas des
+ * instants : la journee de travail d'un chauffeur n'a rien a voir avec le
+ * meridien de Greenwich. Le fuseau se pose par la variable d'environnement
+ * TZ (voir .env.example) ; a defaut, c'est celui du systeme.
+ */
 export function today() {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
 }
 
 /** Ajoute un nombre de jours a une date ISO. */

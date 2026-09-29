@@ -22,7 +22,7 @@
  * route. Le PDF, lui, part tel quel — on ne recompresse pas un document.
  */
 import {
-  h, fill, api, icone, signalerErreur, etat, succes, confirmer,
+  h, donnee, fill, api, icone, signalerErreur, etat, succes, confirmer,
 } from '../core.js';
 
 /** Au-dela, on reduit. En deca, on n'y touche pas : recompresser degrade. */
@@ -91,7 +91,7 @@ export function selecteurPieces({ libelle = 'Photos et justificatifs' } = {}) {
       h('div', { class: 'piece' },
         piece.url
           ? h('img', { src: piece.url, alt: piece.fichier.name })
-          : h('span', { class: 'nom' }, piece.fichier.name),
+          : h('span', { class: 'nom' }, donnee(piece.fichier.name)),
         h('button', {
           type: 'button',
           class: 'retirer',
@@ -107,7 +107,13 @@ export function selecteurPieces({ libelle = 'Photos et justificatifs' } = {}) {
     fill(compte, retenus.length
       ? retenus.length + ' pièce(s) · ' + poids(retenus.reduce((s, p) => s + p.fichier.size, 0))
       : 'Aucune pièce. Vous pouvez enregistrer sans.');
+
+    rafraichirBoutons();
   };
+
+  // Defini plus bas, une fois les boutons construits : peindre() est appele
+  // avant eux au premier rendu, d'ou le point d'entree neutre.
+  let rafraichirBoutons = () => {};
 
   const ajouter = async (listeFichiers) => {
     for (const brut of [...listeFichiers]) {
@@ -138,19 +144,43 @@ export function selecteurPieces({ libelle = 'Photos et justificatifs' } = {}) {
     onchange: (e) => { ajouter(e.target.files); e.target.value = ''; },
   });
 
+  /*
+   * « Prendre une photo » en rend UNE, et il faut le dire.
+   *
+   * L'element porte bien `multiple`, mais sur telephone l'attribut `capture`
+   * prend le dessus : l'appareil photo se ferme apres un cliche et n'en rend
+   * qu'un. Aucun attribut ne change cela — c'est le systeme qui decide.
+   *
+   * On ne peut donc pas promettre « prenez-en plusieurs d'un coup » ; ce
+   * qu'on peut faire, c'est rendre l'enchainement immediat. Apres le premier
+   * cliche, le bouton devient « Prendre une autre photo » et reste exactement
+   * ou le pouce l'a laisse : trois factures et un compteur se photographient
+   * en quatre appuis, sans quitter le formulaire.
+   *
+   * « Choisir un fichier » accepte, lui, une selection multiple : la galerie
+   * rend autant d'images qu'on en coche, et les PDF passent par la.
+   */
+  const boutonAppareil = h('button', {
+    type: 'button', class: 'bouton', onclick: () => champAppareil.click(),
+  }, icone('appareil'), h('span', {}, 'Prendre une photo'));
+
+  const boutonFichier = h('button', {
+    type: 'button', class: 'bouton', onclick: () => champFichier.click(),
+  }, icone('image'), h('span', {}, 'Choisir un fichier'));
+
   const noeud = h('div', { class: 'champ large' },
     h('span', {}, libelle),
     h('div', { class: 'capture' },
-      champAppareil,
-      champFichier,
-      h('button', {
-        type: 'button', class: 'bouton', onclick: () => champAppareil.click(),
-      }, icone('appareil'), h('span', {}, 'Prendre une photo')),
-      h('button', {
-        type: 'button', class: 'bouton', onclick: () => champFichier.click(),
-      }, icone('image'), h('span', {}, 'Choisir un fichier'))),
+      champAppareil, champFichier, boutonAppareil, boutonFichier),
     galerie,
     compte);
+
+  rafraichirBoutons = () => {
+    fill(boutonAppareil, icone('appareil'),
+      h('span', {}, retenus.length ? 'Prendre une autre photo' : 'Prendre une photo'));
+    fill(boutonFichier, icone('image'),
+      h('span', {}, retenus.length ? 'Ajouter un fichier' : 'Choisir un fichier'));
+  };
 
   peindre();
 
@@ -202,7 +232,7 @@ export function galeriePieces(entity, entityId, { modifiable = true } = {}) {
         // Chargement paresseux : une fiche avec vingt photos ne doit pas
         // les telecharger toutes avant de s'afficher (§32).
         ? h('img', { src: '/api/fichiers/' + p.id + '?inline=1', alt: p.nom, loading: 'lazy' })
-        : h('span', { class: 'nom' }, icone('piece'), h('span', {}, p.nom))),
+        : h('span', { class: 'nom' }, icone('piece'), h('span', {}, donnee(p.nom)))),
       modifiable && etat.peut('attachment.delete')
         ? h('button', {
           type: 'button', class: 'retirer', title: 'Supprimer', 'aria-label': 'Supprimer ' + p.nom,

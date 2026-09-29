@@ -16,7 +16,7 @@
  * et l'on prendrait des decisions sur un chiffre faux.
  */
 import {
-  h, fill, api, etat, icone, montant, montantSigne, dateFr, km,
+  h, donnee, fill, api, etat, icone, montant, montantSigne, dateFr, km,
   etatVide, chargement, saisie, liste, signalerErreur, succes,
   demanderMotif, confirmer, aujourdhui, debutDuMois, modale, versCentimes, tuile, rangeeChiffres, champ,
 } from '../core.js';
@@ -31,9 +31,16 @@ function periodes() {
   const moisPrecedent = m === 1 ? { a: a - 1, m: 12 } : { a, m: m - 1 };
   const p = (n) => String(n).padStart(2, '0');
 
+  // La semaine CALENDAIRE (lundi → aujourd'hui) n'est pas la même chose que
+  // les sept derniers jours, et la confusion coûte cher : un vendredi, la
+  // première dit « depuis lundi », la seconde remonte au samedi précédent.
+  // Les deux sont proposées, nommées pour ce qu'elles sont.
+  const lundi = decaler(jour, -((new Date(jour + 'T00:00:00Z').getUTCDay() + 6) % 7));
+
   return [
     { cle: 'jour', libelle: 'Aujourd’hui', du: jour, au: jour },
-    { cle: 'semaine', libelle: '7 derniers jours', du: decaler(jour, -6), au: jour },
+    { cle: 'semaine', libelle: 'Cette semaine', du: lundi, au: jour },
+    { cle: 'sept-jours', libelle: '7 derniers jours', du: decaler(jour, -6), au: jour },
     { cle: 'mois', libelle: 'Ce mois', du: debutDuMois(), au: jour },
     {
       cle: 'mois-1',
@@ -94,14 +101,14 @@ export async function rendre({ parametres }) {
 
   const champVehicule = liste(
     [{ value: '', label: 'Tous les véhicules' },
-      ...vehicules.map((v) => ({ value: v.id, label: v.nom }))],
+      ...vehicules.map((v) => ({ value: v.id, label: donnee(v.nom) }))],
     filtres.vehicule,
     { onchange: (e) => appliquer({ vehicule: e.target.value }) },
   );
 
   const champType = liste(
     [{ value: '', label: 'Tous les types' },
-      ...types.map((t) => ({ value: t.code, label: t.libelle }))],
+      ...types.map((t) => ({ value: t.code, label: donnee(t.libelle) }))],
     filtres.type,
     { onchange: (e) => appliquer({ type: e.target.value }) },
   );
@@ -201,22 +208,30 @@ export async function rendre({ parametres }) {
     }, titre, actif ? h('span', { class: 'fleche' }, filtres.tri === cle ? ' ↓' : ' ↑') : null);
   };
 
+  // `data-libelle` porte l'en-tête de colonne : sur téléphone, la ligne
+  // devient une carte et c'est lui qui nomme chaque valeur.
   const ligne = (a) => h('tr', {},
-    h('td', {}, dateFr(a.date)),
-    h('td', {}, a.vehiculeNom),
-    h('td', {}, a.typeLibelle),
-    h('td', {},
-      a.prestation,
+    h('td', { dataset: { libelle: 'Date' } }, donnee(dateFr(a.date))),
+    h('td', { dataset: { libelle: 'Véhicule' } }, donnee(a.vehiculeNom)),
+    h('td', { dataset: { libelle: 'Type' } }, donnee(a.typeLibelle)),
+    h('td', { dataset: { libelle: 'Prestation' } },
+      donnee(a.prestation),
       a.kilometrageForce
         ? h('small', { class: 'ligne-note' }, ' kilométrage confirmé manuellement')
         : null),
-    h('td', { class: 'num' }, a.kilometrage != null ? km(a.kilometrage) : ''),
-    h('td', { class: 'num' }, a.depenseCents ? montant(a.depenseCents) : ''),
-    h('td', { class: 'num' }, a.recetteCents ? montant(a.recetteCents) : ''),
-    h('td', { class: 'num ' + (a.resultatCents < 0 ? 'resultat-negatif' : 'resultat-positif') },
-      montantSigne(a.resultatCents, false)),
-    h('td', {}, a.nbPieces ? h('span', { class: 'pastille info' }, String(a.nbPieces)) : ''),
-    h('td', {},
+    h('td', { class: 'num', dataset: { libelle: 'Kilométrage' } },
+      a.kilometrage != null ? km(a.kilometrage) : ''),
+    h('td', { class: 'num', dataset: { libelle: 'Dépense' } },
+      a.depenseCents ? montant(a.depenseCents) : ''),
+    h('td', { class: 'num', dataset: { libelle: 'Recette' } },
+      a.recetteCents ? montant(a.recetteCents) : ''),
+    h('td', {
+      class: 'num ' + (a.resultatCents < 0 ? 'resultat-negatif' : 'resultat-positif'),
+      dataset: { libelle: 'Résultat' },
+    }, montantSigne(a.resultatCents, false)),
+    h('td', { dataset: { libelle: 'Pièces' } },
+      a.nbPieces ? h('span', { class: 'pastille info' }, String(a.nbPieces)) : ''),
+    h('td', { class: 'actions' },
       h('div', { class: 'groupe-boutons' },
         h('button', { class: 'bouton petit', onclick: () => ouvrirDetail(a, relire), title: 'Détail' },
           icone('oeil')),
@@ -236,9 +251,10 @@ export async function rendre({ parametres }) {
   const pied = (pagination) => h('div', { class: 'pagination' },
     h('span', { class: 'info' },
       pagination.total
-        ? 'Lignes ' + (pagination.offset + 1) + ' à ' +
-          Math.min(pagination.offset + pagination.limit, pagination.total) +
-          ' sur ' + pagination.total
+        ? h('span', {}, 'Lignes ',
+          donnee((pagination.offset + 1) + ' à ' +
+            Math.min(pagination.offset + pagination.limit, pagination.total)),
+          ' sur ', donnee(pagination.total))
         : ''),
     h('div', { class: 'groupe-boutons' },
       h('button', {
@@ -324,10 +340,10 @@ async function ouvrirDetail(a, apres) {
         h('dd', { class: act.resultatCents < 0 ? 'resultat-negatif' : 'resultat-positif' },
           montantSigne(act.resultatCents)),
         act.notes ? h('dt', {}, 'Notes') : null,
-        act.notes ? h('dd', {}, act.notes) : null,
+        act.notes ? h('dd', {}, donnee(act.notes)) : null,
         act.supprime ? h('dt', {}, 'Corbeille') : null,
-        act.supprime ? h('dd', {}, 'Depuis le ' + dateFr(act.supprimeLe) +
-          (act.motifSuppression ? ' — ' + act.motifSuppression : '')) : null),
+        act.supprime ? h('dd', {}, 'Depuis le ', donnee(dateFr(act.supprimeLe)),
+          act.motifSuppression ? donnee(' — ' + act.motifSuppression) : '') : null),
       h('h3', { style: { marginTop: '16px' } }, 'Pièces jointes'),
       etat.peut('attachment.view')
         ? galeriePieces('activite', act.id, { modifiable: !act.supprime })

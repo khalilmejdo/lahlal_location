@@ -12,9 +12,10 @@
  * jamais demander de naviguer d'abord.
  */
 import {
-  h, fill, $, etat, api, icone, signalerErreur, notifier, succes,
+  h, fill, $, etat, api, icone, signalerErreur, notifier, succes, donnee,
   chargement, etatVide, saisie, champ,
 } from './core.js';
+import { initLangue, definirLangue, langue, LANGUES, chainesManquantes } from './i18n.js';
 
 /* ================================================================== */
 /*  Le menu                                                            */
@@ -28,10 +29,12 @@ import {
  * un clic a chaque fois.
  */
 const MENU = [
-  { route: '', libelle: 'Tableau de bord', icone: 'tableau', droit: 'dashboard.view' },
+  // `libelleCourt` est ce que porte la barre basse du téléphone : quatre
+  // cibles doivent tenir sur 390 px sans rétrécir sous le doigt.
+  { route: '', libelle: 'Tableau de bord', libelleCourt: 'Accueil', icone: 'tableau', droit: 'dashboard.view' },
   { route: 'vehicules', libelle: 'Véhicules', icone: 'voiture', droit: 'vehicle.view' },
   { route: 'activites', libelle: 'Activités', icone: 'activite', droit: 'activity.view' },
-  { route: 'entretiens', libelle: 'Entretiens', icone: 'cle', droit: 'maintenance.view' },
+  { route: 'entretiens', libelle: 'Entretiens', libelleCourt: 'Échéances', icone: 'cle', droit: 'maintenance.view' },
   { route: 'statistiques', libelle: 'Statistiques', icone: 'rapport', droit: 'stats.view' },
   { route: 'reglages', libelle: 'Paramètres', icone: 'administration', droit: 'settings.view' },
   { route: 'comptes', libelle: 'Comptes', icone: 'utilisateur', droit: 'user.view' },
@@ -55,6 +58,10 @@ const VUES = {
 /* ================================================================== */
 
 async function demarrer() {
+  // La langue AVANT tout rendu : elle pose `lang` et `dir` sur le document,
+  // d'où le navigateur tire l'alignement et le sens des listes. Posée
+  // après, le premier écran s'afficherait aligné à gauche en darija.
+  initLangue();
   appliquerTheme(localStorage.getItem('theme') || 'auto');
 
   try {
@@ -102,6 +109,7 @@ async function ouvrirApplication(session) {
 
   $('#bouton-menu').addEventListener('click', () => $('#rail').classList.toggle('ouvert'));
   $('#bouton-theme').addEventListener('click', basculerTheme);
+  construireChoixLangue();
 
   window.addEventListener('hashchange', router);
   window.addEventListener('session-perdue', (e) => {
@@ -173,6 +181,17 @@ async function router() {
   }
 }
 
+/**
+ * Ce qu'il reste a traduire, lisible depuis la console du navigateur :
+ *
+ *     chainesManquantes()
+ *
+ * Rien n'est envoye nulle part. C'est le moyen le plus court de completer
+ * le dictionnaire — on parcourt les ecrans en darija, et la liste dit
+ * exactement ce qui est reste en francais.
+ */
+window.chainesManquantes = chainesManquantes;
+
 /** Navigation interne : les vues appellent ceci plutot que de toucher au hash. */
 export function aller(chemin, parametres = null) {
   const qs = parametres ? '?' + new URLSearchParams(parametres).toString() : '';
@@ -185,18 +204,55 @@ window.aller = aller;
 /* ================================================================== */
 
 function construireMenu() {
-  const nav = $('#navigation');
-  fill(nav, ...MENU
-    .filter((m) => etat.peut(m.droit))
-    .map((m) => h('a', {
-      class: 'nav-lien',
-      href: '#/' + m.route,
-      dataset: { route: m.route },
-    }, icone(m.icone), h('span', {}, m.libelle))));
+  const accessibles = MENU.filter((m) => etat.peut(m.droit));
+
+  fill($('#navigation'), ...accessibles.map((m) => h('a', {
+    class: 'nav-lien',
+    href: '#/' + m.route,
+    dataset: { route: m.route },
+  }, icone(m.icone), h('span', {}, m.libelle))));
+
+  construireOngletsBas(accessibles);
+}
+
+/**
+ * La barre d'onglets du téléphone.
+ *
+ * QUATRE DESTINATIONS, PAS HUIT. Une barre basse tient quatre cibles de
+ * quarante-quatre pixels sur un écran de 390 ; au-delà, elles rétrécissent
+ * et l'on touche à côté. Les quatre retenues sont celles qu'on ouvre tous
+ * les jours ; le reste vit derrière « Plus », qui déplie le rail — il n'est
+ * pas perdu, il est rangé.
+ *
+ * Le rail latéral reste la navigation du bureau : la barre basse disparaît
+ * au-delà de 720 px, et aucun des deux ne duplique l'état de l'autre — ils
+ * lisent la même liste.
+ */
+const ROUTES_PRINCIPALES = ['', 'vehicules', 'activites', 'entretiens'];
+
+function construireOngletsBas(accessibles) {
+  const principales = accessibles.filter((m) => ROUTES_PRINCIPALES.includes(m.route));
+  const reste = accessibles.filter((m) => !ROUTES_PRINCIPALES.includes(m.route));
+
+  const onglets = principales.map((m) => h('a', {
+    class: 'onglet-bas',
+    href: '#/' + m.route,
+    dataset: { route: m.route },
+  }, icone(m.icone, 21), h('span', {}, m.libelleCourt ?? m.libelle)));
+
+  if (reste.length) {
+    onglets.push(h('button', {
+      type: 'button',
+      class: 'onglet-bas',
+      onclick: () => $('#rail').classList.toggle('ouvert'),
+    }, icone('menu', 21), h('span', {}, 'Plus')));
+  }
+
+  fill($('#onglets-bas'), ...onglets);
 }
 
 function marquerMenuActif(racine) {
-  for (const lien of document.querySelectorAll('.nav-lien')) {
+  for (const lien of document.querySelectorAll('.nav-lien, .onglet-bas')) {
     lien.classList.toggle('actif', lien.dataset.route === racine);
   }
   const entree = MENU.find((m) => m.route === racine);
@@ -209,8 +265,8 @@ function construireCarteUtilisateur() {
   fill($('#carte-utilisateur'),
     h('div', { class: 'avatar' }, initiales(u.fullName || u.username)),
     h('div', {},
-      h('strong', {}, u.fullName || u.username),
-      h('span', {}, u.role?.name || '')),
+      h('strong', {}, donnee(u.fullName || u.username)),
+      h('span', {}, donnee(u.role?.name || ''))),
     h('button', {
       type: 'button',
       class: 'bouton-sortie',
@@ -251,6 +307,39 @@ function construireBoutonFlottant() {
 /* ================================================================== */
 /*  Theme                                                              */
 /* ================================================================== */
+
+/**
+ * Le choix de la langue, dans le pied du rail, à côté du thème.
+ *
+ * Une liste déroulante et non deux boutons : elle tient dans la largeur du
+ * rail, et elle s'étendra sans redessiner quoi que ce soit le jour où une
+ * troisième langue arrive.
+ *
+ * Changer de langue recharge la page. C'est assumé : les écrans déjà
+ * construits portent des nœuds de texte figés, et les retraduire en place
+ * demanderait de retenir la chaîne d'origine de chacun — alourdir chaque
+ * rendu de l'application pour un geste qu'on fait deux fois par an.
+ */
+function construireChoixLangue() {
+  const pied = $('.rail-pied');
+  if (!pied) return;
+
+  const select = h('select', {
+    class: 'rail-langue',
+    'aria-label': 'Langue',
+    onchange: (e) => definirLangue(e.target.value),
+    // Le nom d'une langue s'ecrit TOUJOURS dans cette langue : « الدارجة »
+    // ne se traduit pas en francais, ni l'inverse.
+  }, ...LANGUES.map((l) => h('option', { value: l.code }, donnee(l.nom))));
+  select.value = langue();
+
+  // Le thème et la langue partagent une ligne : les deux règlent
+  // l'affichage, et se cherchent au même endroit.
+  const boutonTheme = $('#bouton-theme');
+  const ligne = h('div', { class: 'rail-affichage' });
+  boutonTheme.replaceWith(ligne);
+  ligne.append(boutonTheme, select);
+}
 
 function appliquerTheme(theme) {
   document.documentElement.dataset.theme = theme;

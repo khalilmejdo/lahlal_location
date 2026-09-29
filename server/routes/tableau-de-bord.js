@@ -104,7 +104,12 @@ tableauDeBordRoutes.get(
         vehiculeNom: e.vehiculeNom,
         libelle: e.libelle,
         niveau: e.etat.niveau,
+        // `detail` est la phrase toute faite, en francais ; `etat` porte les
+        // NOMBRES. L'ecran prefere les nombres — c'est lui qui met les mots,
+        // et lui seul sait dans quelle langue. La phrase reste pour ce qui
+        // ne traduit pas : l'etat imprimable, et les anciens appels.
         detail: e.alerte?.detail ?? null,
+        etat: e.etat,
         prochainKm: e.prochainKm,
         prochaineDate: e.prochaineDate,
       })),

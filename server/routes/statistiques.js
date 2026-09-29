@@ -101,13 +101,28 @@ statistiqueRoutes.get(
       params,
     );
 
-    // Par mois : la serie qui se dessine en courbe.
-    const parMois = await all(
-      `SELECT to_char(date_trunc('month', a.date_activite), 'YYYY-MM') AS mois,
+    // Par periode : la serie qui se dessine en colonnes.
+    //
+    // La granularite est un CHOIX D'ECRAN, pas une constante. « Combien
+    // j'ai depense cette semaine » et « combien ce mois-ci » sont deux
+    // questions differentes, et la seconde ne repond pas a la premiere :
+    // un mois qui finit bien peut cacher trois semaines mauvaises.
+    //
+    // `date_trunc` ne prend pas de parametre lie : la valeur vient d'une
+    // liste blanche, jamais de la requete telle quelle.
+    const granularite = ctx.query('granularite') === 'semaine' ? 'semaine' : 'mois';
+    const unite = granularite === 'semaine' ? 'week' : 'month';
+    // La semaine ISO commence le lundi — c'est ce que fait date_trunc, et
+    // c'est la semaine dont parlent les gens ici.
+    const format = granularite === 'semaine' ? 'IYYY-"S"IW' : 'YYYY-MM';
+
+    const parPeriode = await all(
+      `SELECT to_char(date_trunc('${unite}', a.date_activite), '${format}') AS periode,
+              MIN(a.date_activite) AS debut,
               ${AGREGATS}
          FROM activites a
          ${where}
-        GROUP BY 1
+        GROUP BY date_trunc('${unite}', a.date_activite)
         ORDER BY 1`,
       params,
     );
@@ -125,7 +140,12 @@ statistiqueRoutes.get(
         kilometresParcourus: l.km_min !== null && l.km_max !== null ? l.km_max - l.km_min : null,
       })),
       parType: parType.map((l) => ({ code: l.code, libelle: l.libelle, ...nombres(l) })),
-      parMois: parMois.map((l) => ({ mois: l.mois, ...nombres(l) })),
+      granularite,
+      parPeriode: parPeriode.map((l) => ({
+        periode: l.periode,
+        debut: l.debut,
+        ...nombres(l),
+      })),
     });
   },
   { permission: 'stats.view' },

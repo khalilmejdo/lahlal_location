@@ -14,7 +14,7 @@
  * sont ouverts directement, sans naviguer ailleurs.
  */
 import {
-  h, fill, api, etat, icone, dateFr, entier,
+  h, donnee, donneeIsolee, texteEcheance, fill, api, etat, icone, dateFr, entier,
   etatVide, chargement, modale, champ, saisie, liste, zoneTexte,
   pastilleNiveau, signalerErreur, succes, demanderMotif, aujourdhui, versCentimes, tuile, rangeeChiffres,
 } from '../core.js';
@@ -83,8 +83,8 @@ export async function rendre({ parametres }) {
           class: 'bouton sourdine petit',
           onclick: () => aller('vehicules/' + e.vehiculeId),
           title: 'Ouvrir la fiche du véhicule',
-        }, e.vehiculeNom),
-        ' — ' + e.libelle),
+        }, donneeIsolee(e.vehiculeNom)),
+        donneeIsolee(' — ' + e.libelle)),
       h('span', {},
         pastilleNiveau(e.etat.niveau),
         etat.peut('maintenance.close') && e.etat.surveille
@@ -108,8 +108,10 @@ export async function rendre({ parametres }) {
           }, icone('corbeille'))
           : null)),
     h('span', { class: 'echeance-detail' },
-      e.alerte?.detail || 'Pas d’échéance exploitable.',
-      e.kilometrageVehicule != null ? ' · compteur ' + entier(e.kilometrageVehicule) + ' km' : '',
+      texteEcheance(e.etat) ?? 'Pas d’échéance exploitable.',
+      e.kilometrageVehicule != null
+        ? h('span', {}, ' · compteur ', donnee(entier(e.kilometrageVehicule) + ' km'))
+        : '',
       e.derniereDate ? ' · dernière fois le ' + dateFr(e.derniereDate) : ''));
 
   fill(racine,
@@ -129,7 +131,7 @@ export async function rendre({ parametres }) {
       h('div', { class: 'filtres' },
         champ('Véhicule', liste(
           [{ value: '', label: 'Tous les véhicules' },
-            ...(etat.meta?.vehicules ?? []).map((v) => ({ value: v.id, label: v.nom }))],
+            ...(etat.meta?.vehicules ?? []).map((v) => ({ value: v.id, label: donnee(v.nom) }))],
           filtres.vehicule,
           { onchange: (e) => appliquer({ vehicule: e.target.value }) },
         )),
@@ -164,13 +166,13 @@ export function ouvrirFormulaireEntretien({ vehicule = null, existant = null } =
     const suggestions = etat.meta?.intervallesSugeres ?? {};
 
     const champVehicule = liste(
-      vehicules.map((v) => ({ value: v.id, label: v.nom + ' — ' + v.immatriculation })),
+      vehicules.map((v) => ({ value: v.id, label: donnee(v.nom + ' — ' + v.immatriculation) })),
       existant?.vehiculeId ?? vehicule?.id ?? vehicules[0]?.id,
     );
     if (existant || vehicule) champVehicule.disabled = true;
 
     const champType = liste(
-      types.map((t) => ({ value: t.code, label: t.libelle })),
+      types.map((t) => ({ value: t.code, label: donnee(t.libelle) })),
       existant?.typeCode ?? types[0]?.code,
     );
     const champLibelle = saisie({ maxlength: 120, required: true, value: existant?.libelle ?? '' });
