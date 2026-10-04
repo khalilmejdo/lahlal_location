@@ -118,6 +118,16 @@ retrouve pas. La sauvegarde de la base emporte les pièces avec elle.
 Le `mime` est contraint à cinq valeurs, et il est déterminé par les **octets
 d'en-tête** du fichier, jamais par son extension.
 
+#### La corbeille
+
+`deleted_at`, `deleted_by` et `delete_reason` portent la suppression : elle est
+**logique**, et le motif est obligatoire. La pièce sort des listes et sa
+restitution répond 404, mais ses octets restent en base jusqu'à décision
+contraire d'un super-administrateur.
+
+`idx_fichiers_entity` est **partiel** (`WHERE deleted_at IS NULL`) : la
+corbeille ne pèse pas sur la lecture courante, qui est le cas fréquent.
+
 ### `types`
 
 Les types d'activité **et** d'entretien, dans une seule table, distingués par
@@ -182,7 +192,7 @@ Ceux que le §32 demande, et rien de plus.
 | `uq_activites_idempotency` | le rejeu d'un envoi |
 | `idx_entretiens_vehicule` | les échéances d'un véhicule |
 | `idx_entretiens_date` / `_km` | les échéances qui approchent |
-| `idx_fichiers_entity` | les pièces d'une entité |
+| `idx_fichiers_entity` | les pièces d'une entité — partiel, hors corbeille |
 | `idx_vehicules_actifs` | la liste, hors archivés |
 | `idx_activites_rech_*` | la recherche textuelle (si `pg_trgm` est là) |
 

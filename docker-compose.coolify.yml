@@ -1,0 +1,102 @@
+# =====================================================================
+#  Lahlal — gestion de flotte : déploiement Coolify
+#
+#  À utiliser dans Coolify : + New → Resource → Docker Compose, en
+#  indiquant ce fichier. Ne pas confondre avec `docker-compose.yml`, qui
+#  est le montage du poste de développement — celui-là porte un mot de
+#  passe en clair, des cookies non sécurisés et des ports publiés.
+#
+#  CE FICHIER NE CONTIENT AUCUN SECRET. Tout ce qui en est un se pose
+#  dans Environment Variables, côté Coolify. La syntaxe `${VAR:?message}`
+#  fait échouer le déploiement si la variable manque, plutôt que de
+#  démarrer sur une valeur vide.
+# =====================================================================
+services:
+
+  base:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?renseignez POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:?renseignez POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?renseignez POSTGRES_PASSWORD}
+      # Le même fuseau que l'application : les journaux de la base et ceux
+      # de l'application doivent se lire côte à côte.
+      TZ: ${TZ:-Africa/Casablanca}
+    volumes:
+      - donnees-base:/var/lib/postgresql/data
+    # AUCUN port publié. La base n'est joignable que par l'application, sur
+    # le réseau interne du projet. C'est la raison pour laquelle
+    # DATABASE_SSL=off est légitime ici : le trafic ne quitte pas la machine.
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  application:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # Coolify fournit l'empreinte du commit construit. Sans elle, rien
+        # ne distingue une image déployée d'une image restée en arrière.
+        SOURCE_COMMIT: ${SOURCE_COMMIT:-}
+    restart: unless-stopped
+    depends_on:
+      base:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3000
+      TZ: ${TZ:-Africa/Casablanca}
+
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@base:5432/${POSTGRES_DB}
+      DATABASE_SSL: 'off'
+
+      # Derrière le proxy de Coolify : UN seul saut.
+      TRUST_PROXY: 'true'
+      TRUST_PROXY_HOPS: '1'
+      # X-Real-IP n'est lu que si le proxy l'écrase. Laisser à false sauf
+      # certitude : sinon un client qui le fabrique échappe à la limitation
+      # de débit, tentatives de connexion comprises.
+      TRUST_REAL_IP: 'false'
+
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:?renseignez ALLOWED_ORIGINS}
+      SECURE_COOKIES: 'true'
+      ENABLE_HSTS: 'true'
+
+      APP_SECRET: ${APP_SECRET:?renseignez APP_SECRET}
+      APP_PASSWORD_PEPPER: ${APP_PASSWORD_PEPPER:?renseignez APP_PASSWORD_PEPPER}
+
+      # Le premier compte, créé au premier seed seulement. À RETIRER des
+      # variables Coolify une fois la connexion faite.
+      BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:-admin}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+
+      UPLOAD_MAX_MB: ${UPLOAD_MAX_MB:-10}
+      AUDIT_ANCRE_EXTERNE: 'true'
+    expose:
+      - '3000'
+    volumes:
+      # L'ANCRE DU JOURNAL D'AUDIT VIT ICI, et elle doit survivre aux
+      # redéploiements. Sur un système de fichiers éphémère, elle disparaît
+      # à chaque mise à jour et ne prouve plus rien — c'est précisément ce
+      # qu'elle sert à éviter. Les pièces jointes, elles, sont en base.
+      - donnees-app:/app/data
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  donnees-base:
+  donnees-app:

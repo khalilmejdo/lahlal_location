@@ -84,6 +84,14 @@ export const PERMISSIONS = [
     category: 'Pièces jointes',
     sensitive: true,
   },
+  // Revenir sur une suppression. Réservé : c'est le filet, et un filet que
+  // tout le monde peut relever n'en est plus un.
+  {
+    code: 'attachment.restore',
+    label: 'Restaurer une pièce jointe supprimée',
+    category: 'Pièces jointes',
+    sensitive: true,
+  },
 
   // --- Parametrage
   { code: 'settings.view', label: 'Consulter les paramètres', category: 'Paramétrage' },
@@ -112,7 +120,21 @@ export const isKnownPermission = (code) => PERMISSION_SET.has(code);
  * les droits d'un role ne se reprend pas sans passer par un compte de rang
  * superieur.
  */
-export const RESERVE_SUPERADMIN = ['role.manage'];
+/**
+ * Ce que le super-administrateur garde pour lui.
+ *
+ * Avec deux roles, cette liste est le SEUL garde-fou de droits qui reste :
+ * elle doit donc rester minuscule, et chaque entree porter sa raison.
+ *
+ * `user.manage` y figure par necessite autant que par choix. Le rang veut
+ * qu'on n'agisse que sur STRICTEMENT inferieur a soi ; deux administrateurs
+ * partagent le rang 10, donc un administrateur ne peut de toute facon ni en
+ * creer un autre, ni le modifier. Lui laisser le droit aurait ete lui
+ * donner une case qui ne fait rien — exactement ce que ce module refuse
+ * ailleurs. Les comptes se gerent donc depuis le super-administrateur ;
+ * l'administrateur garde `user.view`, pour savoir qui a acces.
+ */
+export const RESERVE_SUPERADMIN = ['role.manage', 'user.manage', 'attachment.restore'];
 
 const RESERVE = new Set(RESERVE_SUPERADMIN);
 
@@ -124,40 +146,33 @@ export const PERMISSIONS_ADMIN = PERMISSION_CODES.filter((code) => !RESERVE.has(
 /* ------------------------------------------------------------------ */
 
 /**
- * Le gestionnaire de flotte : le role de travail courant.
+ * DEUX ROLES, ET DEUX SEULEMENT.
  *
- * Il tient la flotte de bout en bout — vehicules, activites, entretiens,
- * pieces — mais ne touche ni aux comptes, ni aux seuils, ni au journal.
- */
-const GESTIONNAIRE = [
-  'dashboard.view', 'stats.view', 'export.data',
-  'vehicle.view', 'vehicle.create', 'vehicle.edit',
-  'activity.view', 'activity.create', 'activity.edit', 'activity.force_mileage',
-  'maintenance.view', 'maintenance.create', 'maintenance.edit', 'maintenance.close',
-  'attachment.view', 'attachment.add', 'attachment.delete',
-  'settings.view',
-];
-
-/**
- * La saisie : celui qui est sur le terrain, telephone en main.
+ * Le module en portait cinq — gestionnaire, saisie terrain, consultation —
+ * et c'etait une erreur d'appreciation : cette flotte se tient a deux ou
+ * trois personnes qui font toutes le meme travail. Cinq roles, c'est cinq
+ * jeux de droits a maintenir, cinq facons de se tromper en creant un
+ * compte, et une matrice que personne ne relit.
  *
- * Il enregistre ce qu'il fait et photographie ses justificatifs. Il ne
- * modifie pas une activite deja enregistree — il la signale — et ne supprime
- * rien. C'est le role pour lequel le parcours mobile est concu (§23).
+ * CE QUI PROTEGE ICI N'EST PAS LA RESTRICTION, C'EST LA TRACE.
+ *
+ * Un administrateur peut tout faire, y compris se tromper. Le dispositif
+ * qui repond a l'erreur n'est donc pas le refus — il est ailleurs, et il
+ * est complet :
+ *
+ *   - rien ne se detruit vraiment. Une activite part a la corbeille et se
+ *     restaure ; un vehicule s'archive ; une piece jointe supprimee se
+ *     recupere ; une echeance deja realisee se clot au lieu de disparaitre ;
+ *   - tout geste est inscrit au journal, avec son auteur, son horodatage,
+ *     le detail champ par champ et, pour les gestes destructeurs, le motif
+ *     obligatoire ;
+ *   - le journal lui-meme ne se modifie pas — chaine de condensats, ancre
+ *     hors base, declencheur PostgreSQL qui refuse UPDATE et DELETE.
+ *
+ * Le super-administrateur garde ce qui touche a la hierarchie elle-meme :
+ * redefinir les droits d'un role. Il se cree en ligne de commande, jamais
+ * depuis un ecran.
  */
-const SAISIE = [
-  'dashboard.view',
-  'vehicle.view',
-  'activity.view', 'activity.create',
-  'maintenance.view',
-  'attachment.view', 'attachment.add',
-];
-
-/** La consultation seule : voir l'etat de la flotte, sans rien y changer. */
-const LECTURE = [
-  'dashboard.view', 'stats.view',
-  'vehicle.view', 'activity.view', 'maintenance.view', 'attachment.view',
-];
 
 /**
  * @type {Array<{code:string,name:string,description:string,isSystem:boolean,rank:number,sort:number,permissions:string[]|'*'}>}
@@ -170,7 +185,8 @@ export const DEFAULT_ROLES = [
     name: 'Super-administrateur',
     description:
       'Autorité au-dessus de l’administrateur : seul à pouvoir redéfinir les droits ' +
-      'd’un rôle, modifier un compte administrateur ou le supprimer.',
+      'd’un rôle, agir sur un compte administrateur, et restaurer une pièce jointe ' +
+      'supprimée.',
     isSystem: true,
     rank: 0,
     sort: 5,
@@ -180,41 +196,13 @@ export const DEFAULT_ROLES = [
     code: 'ADMIN',
     name: 'Administrateur',
     description:
-      'Accès complet à la gestion courante : flotte, activités, entretiens, comptes, ' +
-      'seuils d’alerte et journal d’audit.',
+      'Le rôle de travail : véhicules, activités, entretiens, pièces jointes, comptes, ' +
+      'seuils d’alerte et journal. Tout ce qu’il fait est tracé, et rien de ce qu’il ' +
+      'supprime n’est perdu.',
     isSystem: true,
     rank: 10,
     sort: 10,
     permissions: PERMISSIONS_ADMIN,
-  },
-  {
-    code: 'GESTIONNAIRE',
-    name: 'Gestionnaire de flotte',
-    description: 'Tient la flotte au quotidien : véhicules, activités, entretiens et pièces.',
-    isSystem: true,
-    rank: 20,
-    sort: 20,
-    permissions: GESTIONNAIRE,
-  },
-  {
-    code: 'SAISIE',
-    name: 'Saisie terrain',
-    description:
-      'Enregistre les activités depuis le téléphone et joint les photos. ' +
-      'Ne modifie ni ne supprime ce qui est déjà enregistré.',
-    isSystem: true,
-    rank: 40,
-    sort: 40,
-    permissions: SAISIE,
-  },
-  {
-    code: 'LECTURE',
-    name: 'Consultation',
-    description: 'Voit l’état de la flotte et son historique, sans rien y changer.',
-    isSystem: true,
-    rank: 60,
-    sort: 60,
-    permissions: LECTURE,
   },
 ];
 

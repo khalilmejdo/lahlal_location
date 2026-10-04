@@ -26,6 +26,7 @@ assertConfig();
 
 const stats = {
   permissions: 0, permissionsRetirees: 0, roles: 0, rolesMisAJour: 0,
+  rolesSupprimes: 0, rolesRetenus: [],
   reglages: 0, types: 0, comptes: 0,
 };
 
@@ -101,6 +102,43 @@ async function seedRoles(tx) {
         [id, codes],
       );
     }
+  }
+
+  await retirerRolesDisparus(tx);
+}
+
+/**
+ * Les roles retires du code s'en vont — mais jamais sous les pieds de
+ * quelqu'un.
+ *
+ * Le module a d'abord porte cinq roles, puis deux. Les trois autres
+ * resteraient en base indefiniment : visibles a l'ecran de creation d'un
+ * compte, attribuables, et porteurs de droits que plus personne ne relit.
+ *
+ * Un role encore DETENU n'est pas supprime : on ne retire pas ses droits a
+ * quelqu'un pendant qu'il travaille. Le seed le signale, et c'est a
+ * l'exploitant de deplacer les comptes concernes puis de relancer.
+ */
+async function retirerRolesDisparus(tx) {
+  const connus = DEFAULT_ROLES.map((r) => r.code);
+
+  const orphelins = await tx.all(
+    `SELECT r.id, r.code, r.name,
+            (SELECT COUNT(*)::int FROM users u WHERE u.role_id = r.id) AS comptes
+       FROM roles r
+      WHERE r.code <> ALL($1::text[])
+      ORDER BY r.rank`,
+    [connus],
+  );
+
+  for (const role of orphelins) {
+    if (role.comptes > 0) {
+      stats.rolesRetenus.push(role.code + ' (' + role.comptes + ' compte(s))');
+      continue;
+    }
+    // role_permissions part en cascade (ON DELETE CASCADE).
+    await tx.query('DELETE FROM roles WHERE id = $1', [role.id]);
+    stats.rolesSupprimes += 1;
   }
 }
 
@@ -202,7 +240,12 @@ async function main() {
   console.log('  Permissions ......... ' + stats.permissions + ' posee(s)' +
     (stats.permissionsRetirees ? ', ' + stats.permissionsRetirees + ' retiree(s)' : ''));
   console.log('  Roles ............... ' + stats.roles + ' cree(s), ' +
-    stats.rolesMisAJour + ' mis a jour');
+    stats.rolesMisAJour + ' mis a jour' +
+    (stats.rolesSupprimes ? ', ' + stats.rolesSupprimes + ' retire(s)' : ''));
+  for (const retenu of stats.rolesRetenus) {
+    console.log('    ATTENTION : le role ' + retenu + ' n existe plus dans le code,');
+    console.log('    mais il est encore detenu. Deplacez ces comptes, puis relancez.');
+  }
   console.log('  Reglages ............ ' + stats.reglages + ' pose(s)');
   console.log('  Types ............... ' + stats.types + ' pose(s)');
 
@@ -220,6 +263,42 @@ async function main() {
     console.log('\n  Aucun compte : personne ne peut se connecter.');
     console.log('  Renseignez BOOTSTRAP_ADMIN_PASSWORD puis relancez, ou creez');
     console.log('  un super-administrateur : npm run superadmin');
+    console.log('');
+    return;
+  }
+
+  /*
+   * L'INSTALLATION N'EST PAS FINIE SANS SUPER-ADMINISTRATEUR.
+   *
+   * Depuis le passage a deux roles, trois gestes lui sont reserves : creer
+   * un compte, reinitialiser un mot de passe, et restaurer une piece
+   * jointe. Un deploiement qui s'arrete au compte d'amorcage donne donc une
+   * application qui tourne — et dans laquelle on ne peut ni ajouter un
+   * collegue, ni depanner quelqu'un qui a perdu son mot de passe.
+   *
+   * Le defaut se decouvrirait le jour ou l'on en a besoin, c'est-a-dire au
+   * plus mauvais moment. Il se dit donc ici, a chaque demarrage, tant qu'il
+   * dure.
+   */
+  const superadmins = await value(
+    `SELECT COUNT(*)::int FROM users u
+       JOIN roles r ON r.id = u.role_id
+      WHERE r.code = 'SUPERADMIN' AND u.is_active`,
+  );
+  if (Number(superadmins) === 0) {
+    console.log('');
+    console.log('  ATTENTION : aucun super-administrateur.');
+    console.log('');
+    console.log('  Trois gestes lui sont reserves et ne sont donc possibles pour');
+    console.log('  personne aujourd hui : creer un compte, reinitialiser un mot de');
+    console.log('  passe, restaurer une piece jointe supprimee.');
+    console.log('');
+    console.log('    npm run superadmin -- --username direction --nom "Nom Prenom"');
+    console.log('');
+    console.log('  Le mot de passe s affiche UNE fois. Prevoyez-en deux comptes :');
+    console.log('  ce role ne se reinitialise que depuis le serveur.');
+  } else {
+    console.log('  Super-administrateur .. ' + superadmins + ' compte(s) actif(s)');
   }
   console.log('');
 }

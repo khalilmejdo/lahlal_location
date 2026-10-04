@@ -54,6 +54,25 @@ describe('§47 — Véhicule', () => {
     assert.match(r.donnees.error.message, /1234-A-56/);
   });
 
+  test('modifier un véhicule, et le relire modifié', async () => {
+    const r = await admin.appel('PATCH', '/api/vehicules/' + vehiculeId, {
+      libelle: 'Master de l’atelier',
+      statut: 'EN_SERVICE',
+      notes: 'Affecté au dépannage de nuit',
+    });
+    assert.equal(r.statut, 200, JSON.stringify(r.donnees));
+    assert.equal(r.donnees.vehicule.nom, 'Master de l’atelier');
+    assert.equal(r.donnees.vehicule.statut, 'EN_SERVICE');
+
+    // Et le changement est relu tel quel : une réponse qui dit « modifié »
+    // sans que la lecture suivante le confirme ne prouve rien.
+    const relu = await admin.appel('GET', '/api/vehicules/' + vehiculeId);
+    assert.equal(relu.donnees.vehicule.notes, 'Affecté au dépannage de nuit');
+
+    // On remet le nom d'origine : la suite s'y réfère.
+    await admin.appel('PATCH', '/api/vehicules/' + vehiculeId, { libelle: 'Renault Master' });
+  });
+
   test('une immatriculation vide est refusée', async () => {
     const r = await admin.appel('POST', '/api/vehicules', { immatriculation: '' });
     // 422 et non 400 : la requete est bien formee, c'est le champ qui ne
@@ -473,6 +492,92 @@ describe('§41 — Pièces jointes', () => {
     assert.equal(r.statut, 422, 'entite hors de la liste blanche');
   });
 
+  describe('la corbeille des pièces jointes', () => {
+    /*
+     * C'ETAIT LE DERNIER GESTE IRREVERSIBLE DU MODULE.
+     *
+     * La suppression effacait le binaire : une photo de compteur supprimee
+     * par erreur ne se retrouvait pas. Tout le reste avait sa corbeille ou
+     * son archivage ; celle-ci non. Elle l'a desormais, et c'est justement
+     * ce qui se verifie ici — la garantie, pas l'intention.
+     */
+    let pieceId;
+    let direction;
+
+    before(async () => {
+      direction = await app.connexionSuperadmin();
+      const envoi = await envoyer([['a-restaurer.png', pngFactice(), 'image/png']]);
+      pieceId = envoi.donnees.pieces[0].id;
+    });
+
+    test('la suppression exige un motif', async () => {
+      const r = await admin.appel('DELETE', '/api/fichiers/' + pieceId, {});
+      assert.equal(r.statut, 422);
+    });
+
+    test('supprimée, elle sort de la liste', async () => {
+      const r = await admin.appel('DELETE', '/api/fichiers/' + pieceId,
+        { motif: 'Photo floue, reprise ensuite' });
+      assert.equal(r.statut, 200, JSON.stringify(r.donnees));
+
+      const liste = await admin.appel('GET',
+        '/api/fichiers?entity=activite&entityId=' + activiteId);
+      assert.ok(!liste.donnees.pieces.some((p) => p.id === pieceId));
+    });
+
+    test('mais elle n’est PAS détruite : le contenu existe toujours', async () => {
+      // C'est toute la difference entre une corbeille et une suppression.
+      const r = await direction.appel('GET', '/api/fichiers/' + pieceId);
+      assert.equal(r.statut, 200);
+      assert.ok(r.donnees.byteLength > 0);
+    });
+
+    test('l’administrateur, lui, ne la voit plus du tout', async () => {
+      const r = await admin.appel('GET', '/api/fichiers/' + pieceId);
+      assert.equal(r.statut, 404);
+    });
+
+    test('la corbeille est réservée au super-administrateur', async () => {
+      const refus = await admin.appel('GET',
+        '/api/fichiers/corbeille?entity=activite&entityId=' + activiteId);
+      assert.equal(refus.statut, 403);
+
+      const vue = await direction.appel('GET',
+        '/api/fichiers/corbeille?entity=activite&entityId=' + activiteId);
+      assert.equal(vue.statut, 200);
+      const piece = vue.donnees.pieces.find((x) => x.id === pieceId);
+      assert.ok(piece, 'la pièce doit figurer à la corbeille');
+      assert.equal(piece.motifSuppression, 'Photo floue, reprise ensuite');
+      assert.ok(piece.supprimePar, 'on doit savoir qui l’a supprimée');
+    });
+
+    test('la restauration la remet dans la liste', async () => {
+      const refus = await admin.appel('POST', '/api/fichiers/' + pieceId + '/restaurer', {});
+      assert.equal(refus.statut, 403, 'un administrateur ne restaure pas');
+
+      const r = await direction.appel('POST', '/api/fichiers/' + pieceId + '/restaurer', {});
+      assert.equal(r.statut, 200, JSON.stringify(r.donnees));
+
+      const liste = await admin.appel('GET',
+        '/api/fichiers?entity=activite&entityId=' + activiteId);
+      assert.ok(liste.donnees.pieces.some((p) => p.id === pieceId),
+        'la pièce doit être revenue');
+    });
+
+    test('restaurer deux fois est refusé', async () => {
+      const r = await direction.appel('POST', '/api/fichiers/' + pieceId + '/restaurer', {});
+      assert.equal(r.statut, 409);
+    });
+
+    test('les deux gestes sont tracés', async () => {
+      await new Promise((r) => setTimeout(r, 400));
+      const journal = await admin.appel('GET', '/api/audit?q=a-restaurer');
+      const actions = journal.donnees.entrees.map((e) => e.action);
+      assert.ok(actions.includes('fichier.delete'), 'suppression non tracée');
+      assert.ok(actions.includes('fichier.restore'), 'restauration non tracée');
+    });
+  });
+
   test('une pièce rattachée à une activité qui n’existe pas est refusée', async () => {
     const r = await envoyer([['x.png', pngFactice(), 'image/png']], 'activite',
       '00000000-0000-7000-8000-000000000000');
@@ -513,66 +618,65 @@ describe('§41 — Sécurité', () => {
     assert.equal(r.statut, 404);
   });
 
-  describe('un compte sans droits n’accède à rien de ce qui ne le regarde pas', () => {
-    let lecteur;
-
-    before(async () => {
+  describe('la frontière entre administrateur et super-administrateur', () => {
+    /*
+     * AVEC DEUX ROLES, CETTE FRONTIERE EST LE SEUL GARDE-FOU DE DROITS.
+     *
+     * L'administrateur fait tout le travail ; le super-administrateur garde
+     * ce qui touche a la hierarchie elle-meme et au filet de securite. Si
+     * cette limite cede, il n'y a plus de limite du tout — d'ou ces essais.
+     */
+    test('un administrateur ne redéfinit pas les droits d’un rôle', async () => {
       const roles = await admin.appel('GET', '/api/utilisateurs/roles');
-      const lecture = roles.donnees.roles.find((r) => r.code === 'LECTURE');
+      const cible = roles.donnees.roles.find((r) => r.code === 'ADMIN');
+      const r = await admin.appel('PUT', '/api/utilisateurs/roles/' + cible.id + '/permissions',
+        { permissions: ['dashboard.view'] });
+      assert.equal(r.statut, 403);
+    });
+
+    test('un administrateur ne voit pas le catalogue des droits', async () => {
+      // Il ne peut pas les redéfinir : lui montrer la liste complète des
+      // cases à cocher ne ferait que suggérer un geste qu'on lui refuse.
+      const r = await admin.appel('GET', '/api/utilisateurs/roles');
+      assert.equal(r.statut, 200);
+      assert.equal(r.donnees.catalogue, undefined);
+    });
+
+    test('un administrateur ne restaure pas une pièce jointe', async () => {
+      const r = await admin.appel('GET',
+        '/api/fichiers/corbeille?entity=vehicule&entityId=' + vehiculeId);
+      assert.equal(r.statut, 403);
+    });
+
+    test('un administrateur ne crée ni ne modifie de compte', async () => {
+      // Les comptes se gèrent depuis le super-administrateur. Le rang
+      // l'imposerait de toute façon : deux administrateurs partagent le
+      // rang 10, et l'on n'agit que sur STRICTEMENT inférieur à soi.
+      const roles = await admin.appel('GET', '/api/utilisateurs/roles');
+      const roleAdmin = roles.donnees.roles.find((r) => r.code === 'ADMIN');
 
       const cree = await admin.appel('POST', '/api/utilisateurs', {
-        username: 'observateur', fullName: 'Observateur', roleId: lecture.id,
+        username: 'second', fullName: 'Second administrateur', roleId: roleAdmin.id,
       });
-      assert.equal(cree.statut, 201, JSON.stringify(cree.donnees));
+      assert.equal(cree.statut, 403);
 
-      // Le nouveau mot de passe ne doit pas contenir l'identifiant : la
-      // politique du socle le refuse, et elle a raison.
-      lecteur = await app.connexion('observateur', cree.donnees.motDePasseProvisoire,
-        { nouveau: 'LectureSeule2026!' });
+      const reinit = await admin.appel('POST',
+        '/api/utilisateurs/' + admin.utilisateur.id + '/mot-de-passe', {});
+      assert.equal(reinit.statut, 403, 'il ne réinitialise pas même son propre mot de passe ici');
     });
 
-    test('il lit les véhicules', async () => {
-      const r = await lecteur.appel('GET', '/api/vehicules');
+    test('il voit en revanche QUI a accès', async () => {
+      // Savoir qui entre dans l'application n'est pas un pouvoir : c'est
+      // une condition pour s'apercevoir d'un compte de trop.
+      const r = await admin.appel('GET', '/api/utilisateurs');
       assert.equal(r.statut, 200);
+      assert.ok(r.donnees.comptes.length >= 1);
     });
 
-    test('il ne crée pas de véhicule', async () => {
-      const r = await lecteur.appel('POST', '/api/vehicules', { immatriculation: 'BB-33-CC' });
-      assert.equal(r.statut, 403);
-    });
-
-    test('il n’enregistre pas d’activité', async () => {
-      const r = await lecteur.appel('POST', '/api/activites', {
-        vehiculeId, date: dateDuJour(), typeCode: 'AUTRE', prestation: 'Essai',
-      });
-      assert.equal(r.statut, 403);
-    });
-
-    test('il ne lit ni les comptes, ni le journal, ni les paramètres', async () => {
-      for (const chemin of ['/api/utilisateurs', '/api/audit', '/api/reglages']) {
-        const r = await lecteur.appel('GET', chemin);
-        assert.equal(r.statut, 403, chemin + ' répond ' + r.statut);
-      }
-    });
-
-    test('il ne modifie aucun seuil', async () => {
-      const r = await lecteur.appel('PATCH', '/api/reglages/alerte.km_urgent', { valeur: 100 });
-      assert.equal(r.statut, 403);
-    });
-
-    test('il ne joint aucune pièce', async () => {
-      const form = new FormData();
-      form.append('entity', 'vehicule');
-      form.append('entityId', vehiculeId);
-      form.append('fichier', new Blob([pngFactice()], { type: 'image/png' }), 'x.png');
-      const r = await lecteur.appel('POST', '/api/fichiers', form);
-      assert.equal(r.statut, 403);
-    });
-
-    test('son refus laisse une trace dans le journal', async () => {
+    test('un refus laisse une trace dans le journal', async () => {
       // C'est ce qu'un contrôle cherche : non pas ce qui a marché, mais qui
       // a tenté ce qu'il n'avait pas le droit de faire.
-      await new Promise((r) => setTimeout(r, 400));
+      await new Promise((r) => setTimeout(r, 500));
       const journal = await admin.appel('GET', '/api/audit?action=acces.refuse');
       assert.ok(journal.donnees.entrees.length > 0, 'aucun refus tracé');
       assert.match(journal.donnees.entrees[0].resume, /refusé/i);
@@ -697,3 +801,92 @@ function ilYADesJours(n) {
   const p = (x) => String(x).padStart(2, '0');
   return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
 }
+
+/* ================================================================== */
+
+describe('L’historisation, vérifiée sur tout ce que la suite a fait', () => {
+  /*
+   * CE CONTROLE VIENT EN DERNIER, ET CE N'EST PAS UN HASARD.
+   *
+   * Toute la suite a créé, modifié, supprimé, restauré, clôturé. Le journal
+   * doit en porter la trace — pas « des » traces, mais une trace pour
+   * chaque FAMILLE de geste. C'est la garantie que remplace la restriction
+   * depuis le passage à deux rôles : un administrateur peut tout faire, et
+   * tout ce qu'il fait se lit.
+   */
+  test('chaque famille de geste a laissé sa trace', async () => {
+    const r = await admin.appel('GET', '/api/audit?limit=200');
+    assert.equal(r.statut, 200);
+    const actions = new Set(r.donnees.entrees.map((e) => e.action));
+
+    const attendues = [
+      'vehicule.create', 'vehicule.update', 'vehicule.archive',
+      'activite.create', 'activite.update', 'activite.delete', 'activite.restore',
+      'entretien.create', 'entretien.effectue',
+      'fichier.upload', 'fichier.delete', 'fichier.restore',
+      'reglage.update',
+      'acces.refuse',
+    ];
+    const absentes = attendues.filter((a) => !actions.has(a));
+    assert.deepEqual(absentes, [], 'gestes non tracés : ' + absentes.join(', '));
+  });
+
+  test('toute entrée porte son auteur, son horodatage et une phrase lisible', async () => {
+    const r = await admin.appel('GET', '/api/audit?limit=200');
+    const muettes = r.donnees.entrees.filter((e) =>
+      !e.par || !e.le || !e.resume || e.resume.length < 15);
+    assert.deepEqual(muettes.map((e) => e.action), [],
+      'entrées sans auteur, sans date ou sans résumé lisible');
+  });
+
+  test('les suppressions portent leur motif', async () => {
+    // Le journal dit qui et quand tout seul. Le motif est la seule chose
+    // qui dise POURQUOI, et c'est la question qu'on se pose six mois après.
+    const r = await admin.appel('GET', '/api/audit?limit=200');
+    const suppressions = r.donnees.entrees.filter((e) =>
+      ['activite.delete', 'fichier.delete', 'vehicule.archive'].includes(e.action));
+    assert.ok(suppressions.length >= 3, 'la suite doit avoir supprimé plusieurs choses');
+    const sansMotif = suppressions.filter((e) => !/Motif\s*:/.test(e.resume));
+    assert.deepEqual(sansMotif.map((e) => e.action), [], 'suppressions sans motif');
+  });
+
+  test('une modification garde l’avant et l’après, champ par champ', async () => {
+    const r = await admin.appel('GET', '/api/audit?action=activite.update');
+    const avecDiff = r.donnees.entrees.find((e) => e.changements);
+    assert.ok(avecDiff, 'aucune modification ne porte de diff');
+    const premier = Object.values(avecDiff.changements)[0];
+    assert.ok('from' in premier && 'to' in premier,
+      'le diff doit porter l’avant ET l’après');
+  });
+
+  test('le journal refuse d’être modifié, même en SQL direct', async () => {
+    // Le déclencheur PostgreSQL est la dernière ligne de défense : il tient
+    // même contre quelqu'un qui a la main sur la base.
+    const { Client } = (await import('pg')).default;
+    const client = new Client({ connectionString: app.urlBase, ssl: false });
+    await client.connect();
+    try {
+      await assert.rejects(
+        () => client.query("UPDATE audit_log SET summary = 'efface' WHERE seq = 1"),
+        /ne se modifie pas/,
+        'un UPDATE sur le journal doit être refusé par la base',
+      );
+      await client.query('ROLLBACK').catch(() => {});
+      await assert.rejects(
+        () => client.query('DELETE FROM audit_log WHERE seq = 1'),
+        /ne se modifie pas/,
+        'un DELETE sur le journal doit être refusé par la base',
+      );
+    } finally {
+      await client.end();
+    }
+  });
+
+  test('la chaîne reste vérifiable après tout ce travail', async () => {
+    const r = await admin.appel('GET', '/api/audit/verifier');
+    assert.equal(r.donnees.valid, true, JSON.stringify(r.donnees));
+    assert.equal(r.donnees.complete, true);
+    assert.equal(r.donnees.anchor.intact, true);
+    assert.equal(r.donnees.ancreExterne.intact, true, 'l’ancre hors base doit concorder');
+  });
+});

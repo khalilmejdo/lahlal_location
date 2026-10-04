@@ -75,9 +75,11 @@ Le `code` est fait pour être testé par l'écran ; le `message` est écrit pour
 | `DELETE /api/entretiens/:id` | `maintenance.delete` |
 | `GET /api/entretiens/suggestions/intervalles` | `maintenance.view` |
 | `GET /api/fichiers?entity=…&entityId=…` | `attachment.view` |
+| `GET /api/fichiers/corbeille` | `attachment.restore` — réservé au super-administrateur |
 | `POST /api/fichiers` | `attachment.add` — débit 30 / 5 min |
 | `GET /api/fichiers/:id` | `attachment.view` |
-| `DELETE /api/fichiers/:id` | `attachment.delete` |
+| `DELETE /api/fichiers/:id` | `attachment.delete` — motif obligatoire |
+| `POST /api/fichiers/:id/restaurer` | `attachment.restore` — réservé au super-administrateur |
 | `GET /api/statistiques` | `stats.view` |
 | `GET /api/exports/activites.xlsx` | `export.data` — débit 20 / 5 min |
 | `GET /api/exports/activites.csv` | `export.data` — débit 20 / 5 min |
@@ -227,6 +229,22 @@ premières en base.
 `GET /api/fichiers/:id?inline=1` affiche l'image dans la page (miniature,
 aperçu) plutôt que de la télécharger. `inline` n'est concédé qu'aux types dont
 on sait qu'ils ne s'exécutent pas, et jamais sur la foi du nom du fichier.
+
+### `DELETE /api/fichiers/:id` — et la corbeille
+
+La suppression attend un **motif** (`{ "motif": "…" }`, 3 caractères au moins)
+et elle est **réversible** : la pièce est marquée supprimée, elle sort des
+listes et `GET /api/fichiers/:id` répond 404 — mais ses octets restent en base.
+
+Qui détient `attachment.restore` échappe à ce 404 et peut :
+
+| Route | Effet |
+|---|---|
+| `GET /api/fichiers/corbeille` | liste les pièces supprimées, avec leur motif, leur auteur et leur date |
+| `POST /api/fichiers/:id/restaurer` | les remet en place |
+
+Ce droit n'est porté que par le super-administrateur. L'administrateur peut
+donc supprimer, mais pas effacer ses traces — c'est toute la différence.
 
 ### `GET /api/statistiques`
 

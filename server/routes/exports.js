@@ -43,7 +43,8 @@ async function lireActivitesFiltrees(ctx) {
             v.immatriculation,
             COALESCE(v.libelle, v.immatriculation) AS vehicule_nom,
             (SELECT COUNT(*) FROM fichiers f
-              WHERE f.entity = 'activite' AND f.entity_id = a.id) AS nb_pieces
+              WHERE f.entity = 'activite' AND f.entity_id = a.id
+                AND f.deleted_at IS NULL) AS nb_pieces
        FROM activites a
        JOIN vehicules v ON v.id = a.vehicule_id
        LEFT JOIN types t ON t.domaine = 'ACTIVITE' AND t.code = a.type_code

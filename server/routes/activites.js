@@ -138,7 +138,8 @@ activiteRoutes.get(
               v.immatriculation AS vehicule_immatriculation,
               COALESCE(v.libelle, v.immatriculation) AS vehicule_nom,
               (SELECT COUNT(*) FROM fichiers f
-                WHERE f.entity = 'activite' AND f.entity_id = a.id) AS nb_pieces
+                WHERE f.entity = 'activite' AND f.entity_id = a.id
+                  AND f.deleted_at IS NULL) AS nb_pieces
          FROM activites a
          JOIN vehicules v ON v.id = a.vehicule_id
          LEFT JOIN types t ON t.domaine = 'ACTIVITE' AND t.code = a.type_code
@@ -247,7 +248,7 @@ activiteRoutes.get(
 
     const pieces = await all(
       `SELECT id, nom_origine, mime, taille, ordre, created_at
-         FROM fichiers WHERE entity = 'activite' AND entity_id = $1
+         FROM fichiers WHERE entity = 'activite' AND entity_id = $1 AND deleted_at IS NULL
         ORDER BY ordre, created_at`,
       [a.id],
     );

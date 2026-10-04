@@ -497,12 +497,48 @@ CREATE TABLE IF NOT EXISTS fichiers (
   sha256       TEXT NOT NULL,
   contenu      BYTEA NOT NULL,
   ordre        INTEGER NOT NULL DEFAULT 0,
+
+  -- Corbeille, comme pour les activites.
+  --
+  -- La suppression etait SECHE : le binaire disparaissait, et une photo de
+  -- compteur effacee par erreur ne se retrouvait pas. C'etait le dernier
+  -- geste irreversible du module, et il n'avait aucune raison de l'etre :
+  -- une piece jointe pese quelques centaines de kilo-octets, la garder
+  -- quelques mois ne coute rien au regard de ce que coute sa perte.
+  --
+  -- Seul le super-administrateur peut restaurer (« attachment.restore ») :
+  -- un filet que tout le monde peut relever n'en est plus un.
+  deleted_at   TIMESTAMPTZ,
+  deleted_by   UUID REFERENCES users(id) ON DELETE SET NULL,
+  delete_reason TEXT,
+
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
   created_by   UUID REFERENCES users(id) ON DELETE SET NULL,
   created_by_name TEXT
 );
 
-CREATE INDEX IF NOT EXISTS idx_fichiers_entity ON fichiers(entity, entity_id, ordre, created_at);
+-- Les colonnes AVANT l'index qui les reference.
+--
+-- « CREATE TABLE IF NOT EXISTS » ne touche pas une table deja creee : sur
+-- une base en service, les trois colonnes ci-dessus n'existent pas encore,
+-- et un index partiel pose avant elles echoue sur « column deleted_at does
+-- not exist ». La migration entiere est alors annulee — elle tourne dans
+-- une seule transaction — et le conteneur refuse de demarrer.
+--
+-- Constate en rejouant le schema sur la base de developpement, le
+-- 4 octobre 2026. L'ordre n'est donc pas une question de style.
+ALTER TABLE fichiers ADD COLUMN IF NOT EXISTS deleted_at    TIMESTAMPTZ;
+ALTER TABLE fichiers ADD COLUMN IF NOT EXISTS deleted_by    UUID REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE fichiers ADD COLUMN IF NOT EXISTS delete_reason TEXT;
+
+-- L'ancien index, sans la clause partielle : il porte le meme nom et
+-- « IF NOT EXISTS » ne le remplacerait pas. On le retire pour que celui
+-- d'en dessous soit bien celui qui s'applique.
+DROP INDEX IF EXISTS idx_fichiers_entity;
+
+-- Index partiel : la corbeille ne pese pas sur la lecture courante.
+CREATE INDEX IF NOT EXISTS idx_fichiers_entity ON fichiers(entity, entity_id, ordre, created_at)
+  WHERE deleted_at IS NULL;
 
 DO $$
 BEGIN

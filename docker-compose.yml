@@ -3,8 +3,11 @@
 #
 #     docker compose up --build
 #
-#  Pour un poste de developpement uniquement. En production, la base est
-#  un service gere et seule l'image applicative est deployee.
+#  POUR UN POSTE DE DEVELOPPEMENT UNIQUEMENT. Ce fichier porte un mot de
+#  passe de base en clair, des cookies non securises et des ports publies
+#  sur la machine : il ne doit jamais partir en production.
+#
+#  Pour deployer : docker-compose.coolify.yml, et docs/DEPLOIEMENT-COOLIFY.md.
 # =====================================================================
 services:
   base:

@@ -125,7 +125,8 @@ entretienRoutes.get(
 
     const pieces = await all(
       `SELECT id, nom_origine, mime, taille, ordre, created_at
-         FROM fichiers WHERE entity = 'entretien' AND entity_id = $1 ORDER BY ordre, created_at`,
+         FROM fichiers WHERE entity = 'entretien' AND entity_id = $1 AND deleted_at IS NULL
+        ORDER BY ordre, created_at`,
       [e.id],
     );
 

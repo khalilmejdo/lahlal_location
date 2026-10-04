@@ -386,6 +386,16 @@ Le contenu est stocké **en base**, pas sur le disque : un conteneur qui
 redémarre repart d'un système de fichiers vide, et une photo de facture perdue
 ne se retrouve pas.
 
+### Supprimer une pièce jointe ne la détruit pas
+
+La suppression exige un **motif** et met la pièce en **corbeille** : elle
+disparaît des listes et sa restitution renvoie 404, mais ses octets restent en
+base. Seul le super-administrateur voit la corbeille (`GET /api/fichiers/corbeille`)
+et peut l'en ressortir (`POST /api/fichiers/:id/restaurer`).
+
+Une facture supprimée par erreur un vendredi soir se retrouve le lundi matin.
+C'est la contrepartie d'un administrateur qui a le droit de tout faire.
+
 Côté navigateur, les images sont **réduites avant l'envoi** (1 600 px, JPEG
 82 %) : une photo de 5 Mo en pèse quelques centaines de kilo-octets, ce qui
 compte quand on saisit depuis le bord de la route.
@@ -439,22 +449,63 @@ un journal muet est un incident, pas un détail.
 
 | Fichier | Contenu |
 |---|---|
+| [`docs/DEPLOIEMENT-COOLIFY.md`](docs/DEPLOIEMENT-COOLIFY.md) | Mise en service sur le serveur, de bout en bout, avec sa recette |
 | [`docs/API.md`](docs/API.md) | Toutes les routes, leurs paramètres et leurs droits |
-| [`docs/EXPLOITATION.md`](docs/EXPLOITATION.md) | Déploiement, variables, sauvegarde, incidents |
+| [`docs/EXPLOITATION.md`](docs/EXPLOITATION.md) | Variables, sauvegarde, incidents |
 | [`docs/MODELE.md`](docs/MODELE.md) | Tables, colonnes, index, migrations |
 | [`.env.example`](.env.example) | Chaque variable, avec sa raison d'être |
 
 ---
 
-## Rôles livrés
+## Deux rôles, et deux seulement
 
 | Rôle | Rang | Ce qu'il fait |
 |---|---|---|
-| Super-administrateur | 0 | Seul à redéfinir les droits d'un rôle ; se crée en ligne de commande |
-| Administrateur | 10 | Tout le reste : flotte, comptes, seuils, journal |
-| Gestionnaire de flotte | 20 | Véhicules, activités, entretiens, pièces |
-| Saisie terrain | 40 | Enregistre et photographie. Ne modifie ni ne supprime |
-| Consultation | 60 | Lit, sans rien changer |
+| Super-administrateur | 0 | Tout. Se crée en ligne de commande, jamais à l'écran |
+| Administrateur | 10 | Tout le travail quotidien : flotte, activités, entretiens, seuils, journal |
+
+Trois droits lui restent réservés : `role.manage` (redéfinir les droits d'un
+rôle), `user.manage` (créer un compte, changer un mot de passe, désactiver)
+et `attachment.restore` (ressortir une pièce de la corbeille).
+
+### Pourquoi deux suffisent
+
+Une hiérarchie à cinq étages se justifie quand des gens différents ont des
+métiers différents. Ici, les mêmes personnes font tout : elles saisissent,
+elles corrigent, elles consultent. Un rôle « saisie terrain » qui ne peut pas
+corriger sa propre faute de frappe n'est pas une sécurité, c'est un appel à
+partager le mot de passe de quelqu'un d'autre.
+
+**Ce qui protège ici n'est pas la restriction, c'est la trace.**
+L'administrateur peut tout faire, y compris supprimer — et :
+
+- rien n'est réellement détruit : véhicules, activités et entretiens sont
+  archivés, les pièces jointes partent en **corbeille** ;
+- tout geste destructeur exige un **motif**, saisi et conservé ;
+- chaque écriture est inscrite au journal d'audit, chaîné par condensats et
+  ancré hors base ;
+- un déclencheur PostgreSQL **refuse** la modification et la suppression
+  d'une ligne du journal, y compris en SQL direct.
+
+### Pourquoi le super-administrateur se crée en ligne de commande
+
+Il est le seul à pouvoir agir sur un administrateur. Si l'interface permettait
+d'en créer un, il suffirait de posséder `user.manage` pour se hisser au-dessus
+de sa propre hiérarchie. L'opération exige donc un accès au serveur :
+
+```sh
+npm run superadmin -- --username direction --nom "Nom Prenom"
+```
+
+Le mot de passe est affiché une seule fois et doit être changé à la première
+connexion.
+
+### La règle de rang
+
+Un compte n'agit que sur un rang **strictement** inférieur au sien. Deux
+administrateurs ne peuvent donc rien l'un contre l'autre, et aucun ne peut
+toucher au super-administrateur. C'est cette règle, et non la liste des
+droits, qui empêche l'escalade.
 
 Les droits de chaque rôle se redéfinissent à l'écran ; un rôle ainsi modifié
 porte `is_customized` et le redémarrage suivant ne le rejoue pas.

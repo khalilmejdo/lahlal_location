@@ -22,9 +22,9 @@
  * n'avait aucun droit sur la comptabilite.
  */
 import { Router } from '../http/router.js';
-import { validate } from '../core/validate.js';
+import { validate, rules } from '../core/validate.js';
 import { newId, sha256 } from '../core/crypto.js';
-import { notFound, badRequest, forbidden, tooLarge, unsupportedMedia } from '../core/errors.js';
+import { notFound, badRequest, forbidden, conflict, tooLarge, unsupportedMedia } from '../core/errors.js';
 import { record } from '../core/audit.js';
 import { can } from '../core/rbac.js';
 import { all, one, transaction } from '../db/index.js';
@@ -85,7 +85,8 @@ fichierRoutes.get(
 
     const pieces = await all(
       `SELECT id, nom_origine, mime, taille, ordre, created_at, created_by_name
-         FROM fichiers WHERE entity = $1 AND entity_id = $2
+         FROM fichiers
+        WHERE entity = $1 AND entity_id = $2 AND deleted_at IS NULL
         ORDER BY ordre, created_at`,
       [entity, entityId],
     );
@@ -107,6 +108,49 @@ const presenter = (f) => ({
   ajouteLe: f.created_at,
   ajoutePar: f.created_by_name,
 });
+
+/* ------------------------------------------------------------------ */
+/*  La corbeille, et le retour                                         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Ce qui a ete mis a la corbeille pour cette entite.
+ *
+ * Reserve, comme la restauration : un filet que tout le monde peut relever
+ * n'en est plus un.
+ */
+fichierRoutes.get(
+  '/corbeille',
+  async (ctx) => {
+    const entity = String(ctx.query('entity') ?? '');
+    const entityId = ctx.queryUuid('entityId');
+    if (!CODES_ENTITES.includes(entity)) throw badRequest('Entité inconnue.');
+    if (!entityId) throw badRequest('Identifiant d’entité absent ou mal formé.');
+
+    await exigerEntite(ctx.user, entity, entityId, 'attachment.restore');
+
+    const pieces = await all(
+      `SELECT f.id, f.nom_origine, f.mime, f.taille, f.ordre, f.created_at,
+              f.created_by_name, f.deleted_at, f.delete_reason,
+              u.username AS supprime_par
+         FROM fichiers f
+         LEFT JOIN users u ON u.id = f.deleted_by
+        WHERE f.entity = $1 AND f.entity_id = $2 AND f.deleted_at IS NOT NULL
+        ORDER BY f.deleted_at DESC`,
+      [entity, entityId],
+    );
+
+    ctx.ok({
+      pieces: pieces.map((f) => ({
+        ...presenter(f),
+        supprimeLe: f.deleted_at,
+        supprimePar: f.supprime_par,
+        motifSuppression: f.delete_reason,
+      })),
+    });
+  },
+  { permission: 'attachment.restore' },
+);
 
 /* ------------------------------------------------------------------ */
 /*  Televersement                                                      */
@@ -201,6 +245,12 @@ fichierRoutes.get(
 
     await exigerEntite(ctx.user, f.entity, f.entity_id, 'attachment.view');
 
+    // Une piece a la corbeille ne se sert plus — sauf a qui peut la
+    // restaurer, qui doit pouvoir la regarder avant de decider.
+    if (f.deleted_at && !can(ctx.user, 'attachment.restore')) {
+      throw notFound('Cette pièce jointe a été supprimée.');
+    }
+
     // L'empreinte a ete calculee a l'entree : si elle ne correspond plus, le
     // contenu a change en base sans passer par l'application. On ne le sert
     // pas — on ne sait pas ce que c'est.
@@ -229,20 +279,38 @@ fichierRoutes.get(
 /*  Suppression                                                        */
 /* ------------------------------------------------------------------ */
 
+/**
+ * La suppression est REVERSIBLE, et c'est un changement assume.
+ *
+ * Elle etait seche : le binaire disparaissait, et une photo de compteur
+ * effacee par erreur ne se retrouvait pas. C'etait le dernier geste
+ * irreversible du module — tout le reste a sa corbeille ou son archivage —
+ * et il n'avait aucune raison de l'etre : une piece pese quelques centaines
+ * de kilo-octets, la garder ne coute rien au regard de ce que coute sa
+ * perte.
+ *
+ * Le motif est obligatoire, comme pour toute mise a la corbeille : c'est ce
+ * qui, dans six mois, dira pourquoi.
+ */
 fichierRoutes.delete(
   '/:id',
   async (ctx) => {
     const f = await one(
-      'SELECT id, entity, entity_id, nom_origine FROM fichiers WHERE id = $1', [ctx.params.id],
+      'SELECT id, entity, entity_id, nom_origine, deleted_at FROM fichiers WHERE id = $1',
+      [ctx.params.id],
     );
     if (!f) throw notFound('Cette pièce jointe n’existe pas.');
+    if (f.deleted_at) throw conflict('Cette pièce jointe est déjà à la corbeille.');
 
     await exigerEntite(ctx.user, f.entity, f.entity_id, 'attachment.delete');
 
+    const { motif } = validate(ctx.body, { motif: rules.requiredReason });
+
     await transaction(async (tx) => {
-      // La suppression est seche : ni corbeille, ni deleted_at, le binaire
-      // disparait. C'est pourquoi elle a son propre droit, sensible.
-      await tx.query('DELETE FROM fichiers WHERE id = $1', [f.id]);
+      await tx.query(
+        'UPDATE fichiers SET deleted_at = now(), deleted_by = $2, delete_reason = $3 WHERE id = $1',
+        [f.id, ctx.user.id, motif],
+      );
       await record({
         tx,
         actor: ctx.user,
@@ -250,8 +318,9 @@ fichierRoutes.delete(
         entity: f.entity,
         entityId: f.entity_id,
         entityLabel: f.nom_origine,
-        summary: 'Suppression définitive de la pièce jointe « ' + f.nom_origine + ' ».',
-        severity: 'warning',
+        summary:
+          'Mise à la corbeille de la pièce jointe « ' + f.nom_origine + ' ». Motif : ' + motif,
+        severity: 'notice',
         ip: ctx.ip,
       });
     });
@@ -259,5 +328,40 @@ fichierRoutes.delete(
     ctx.ok({ supprime: true });
   },
   { permission: 'attachment.delete' },
+);
+
+fichierRoutes.post(
+  '/:id/restaurer',
+  async (ctx) => {
+    const f = await one(
+      'SELECT id, entity, entity_id, nom_origine, deleted_at FROM fichiers WHERE id = $1',
+      [ctx.params.id],
+    );
+    if (!f) throw notFound('Cette pièce jointe n’existe pas.');
+    if (!f.deleted_at) throw conflict('Cette pièce jointe n’est pas à la corbeille.');
+
+    await exigerEntite(ctx.user, f.entity, f.entity_id, 'attachment.restore');
+
+    await transaction(async (tx) => {
+      await tx.query(
+        'UPDATE fichiers SET deleted_at = NULL, deleted_by = NULL, delete_reason = NULL WHERE id = $1',
+        [f.id],
+      );
+      await record({
+        tx,
+        actor: ctx.user,
+        action: 'fichier.restore',
+        entity: f.entity,
+        entityId: f.entity_id,
+        entityLabel: f.nom_origine,
+        summary: 'Restauration de la pièce jointe « ' + f.nom_origine + ' ».',
+        severity: 'notice',
+        ip: ctx.ip,
+      });
+    });
+
+    ctx.ok({ restaure: true });
+  },
+  { permission: 'attachment.restore' },
 );
 

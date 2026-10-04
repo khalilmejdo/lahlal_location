@@ -98,7 +98,8 @@ vehiculeRoutes.get(
     const activites = await all(
       `SELECT a.*, t.libelle AS type_libelle,
               (SELECT COUNT(*) FROM fichiers f
-                WHERE f.entity = 'activite' AND f.entity_id = a.id) AS nb_pieces
+                WHERE f.entity = 'activite' AND f.entity_id = a.id
+                  AND f.deleted_at IS NULL) AS nb_pieces
          FROM activites a
          LEFT JOIN types t ON t.domaine = 'ACTIVITE' AND t.code = a.type_code
         WHERE a.vehicule_id = $1 AND a.deleted_at IS NULL

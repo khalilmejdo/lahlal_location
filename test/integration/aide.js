@@ -133,6 +133,24 @@ export async function monterApplication({ port = 8199 } = {}) {
   await lancer('scripts/migrate.js', env);
   await lancer('scripts/seed.js', env);
 
+  /*
+   * Le super-administrateur, cree comme en production : par le script, donc
+   * depuis le serveur, jamais depuis un ecran.
+   *
+   * Trois gestes lui sont reserves — gerer les comptes, redefinir les
+   * droits d'un role, restaurer une piece jointe. Sans lui, la suite ne
+   * pourrait verifier ni ces trois gestes, ni le fait qu'ils sont refuses
+   * a l'administrateur. Le mot de passe s'affiche une fois : on le lit
+   * dans la sortie du script, exactement comme l'exploitant le ferait.
+   */
+  const sortieSuperadmin = await lancer('scripts/superadmin.js', env);
+  // Ancre sur la ligne entiere : le script parle aussi du « mot de passe »
+  // dans ses explications, et un motif lache y capturerait un mot ordinaire.
+  const motDePasseSuperadmin = sortieSuperadmin.match(/^\s*mot de passe\s+(\S+)\s*$/m)?.[1];
+  if (!motDePasseSuperadmin) {
+    throw new Error('Le mot de passe du super-administrateur ne se lit pas :\n' + sortieSuperadmin);
+  }
+
   const serveur = spawn(process.execPath, ['server/index.js'], {
     cwd: RACINE,
     env: { ...process.env, ...env },
@@ -196,8 +214,14 @@ export async function monterApplication({ port = 8199 } = {}) {
 
   return {
     base,
+    // La chaine de connexion de la base jetable : un essai verifie que le
+    // declencheur du journal tient meme contre un acces SQL direct.
+    urlBase,
     appelAnonyme: fabriquerAppel({}),
     connexion,
+    /** Ouvre la session du super-administrateur cree a l'amorcage. */
+    connexionSuperadmin: () => connexion('direction', motDePasseSuperadmin,
+      { nouveau: 'ParcEprouve2026!' }),
     journal: () => journal,
     async arreter() {
       serveur.kill();

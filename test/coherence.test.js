@@ -113,22 +113,62 @@ describe('Les droits', () => {
     assert.equal(Math.min(...rangs), 0, 'le super-administrateur doit être au rang 0');
   });
 
-  test('le rôle de saisie terrain ne peut ni modifier ni supprimer', () => {
-    // C'est le rôle prévu pour le téléphone (§23) : il enregistre et
-    // photographie, il ne réécrit pas l'historique.
-    const saisie = DEFAULT_ROLES.find((r) => r.code === 'SAISIE');
-    for (const interdit of ['activity.edit', 'activity.delete', 'vehicle.archive',
-      'maintenance.delete', 'attachment.delete', 'settings.edit', 'user.manage']) {
-      assert.ok(!saisie.permissions.includes(interdit),
-        'SAISIE ne doit pas détenir ' + interdit);
-    }
+  test('deux rôles, et deux seulement', () => {
+    // Décision du 4 octobre 2026 : cette flotte se tient à deux ou trois
+    // personnes qui font le même travail. Cinq rôles, c'était cinq jeux de
+    // droits à maintenir et une matrice que personne ne relit.
+    assert.deepEqual(DEFAULT_ROLES.map((r) => r.code), ['SUPERADMIN', 'ADMIN']);
   });
 
-  test('le rôle de consultation ne détient aucun droit d’écriture', () => {
-    const lecture = DEFAULT_ROLES.find((r) => r.code === 'LECTURE');
-    const ecritures = lecture.permissions.filter((p) =>
-      /\.(create|edit|delete|archive|close|add|manage|force_mileage)$/.test(p));
-    assert.deepEqual(ecritures, [], 'LECTURE détient : ' + ecritures.join(', '));
+  test('le super-administrateur détient tout', () => {
+    const su = DEFAULT_ROLES.find((r) => r.code === 'SUPERADMIN');
+    assert.equal(su.permissions, '*');
+    assert.equal(su.rank, 0);
+  });
+
+  test('l’administrateur détient tout, sauf exactement ce qui est réservé', () => {
+    // L'écart entre les deux rôles doit être LISIBLE : il se lit dans
+    // RESERVE_SUPERADMIN, et nulle part ailleurs.
+    const admin = DEFAULT_ROLES.find((r) => r.code === 'ADMIN');
+    const manquantes = PERMISSION_CODES.filter((c) => !admin.permissions.includes(c));
+    assert.deepEqual(manquantes.sort(), [...RESERVE_SUPERADMIN].sort());
+  });
+
+  test('ce qui est réservé touche la hiérarchie ou le filet, rien d’autre', () => {
+    /*
+     * Avec deux rôles, la réserve est le SEUL garde-fou de droits qui
+     * reste. Elle doit donc rester minuscule et justifiable :
+     *
+     *   - redéfinir les droits d'un rôle, parce qu'on ne se hisse pas
+     *     au-dessus de sa propre hiérarchie ;
+     *   - gérer les comptes, pour la même raison — et parce que le rang
+     *     l'interdirait de toute façon entre administrateurs ;
+     *   - restaurer une pièce jointe, parce qu'un filet que tout le monde
+     *     peut relever n'en est plus un.
+     *
+     * Toute autre entrée ici demande une raison écrite.
+     */
+    assert.deepEqual([...RESERVE_SUPERADMIN].sort(),
+      ['attachment.restore', 'role.manage', 'user.manage']);
+  });
+
+  test('aucun droit réservé ne reste sans effet pour l’administrateur', () => {
+    /*
+     * Une case à cocher qui ne ferme rien est pire qu'une case absente :
+     * elle dispense de chercher le vrai contrôle. Chaque droit réservé doit
+     * donc être EXIGÉ par au moins une route — sinon il décore.
+     */
+    const router = buildRouter();
+    const exigees = new Set();
+    for (const [, liste] of router.routes) {
+      for (const r of liste) {
+        const p = r.options?.permission;
+        for (const code of Array.isArray(p) ? p : [p]) if (code) exigees.add(code);
+      }
+    }
+    const decoratives = RESERVE_SUPERADMIN.filter((c) => !exigees.has(c));
+    assert.deepEqual(decoratives, [],
+      'droits réservés qu’aucune route n’exige : ' + decoratives.join(', '));
   });
 });
 
@@ -506,5 +546,221 @@ describe('Les dates sont calendaires, pas des instants UTC', () => {
     // Alpine ne connaît aucun fuseau nommé sans tzdata : TZ y serait sans effet.
     const dockerfile = fs.readFileSync(new URL('Dockerfile', RACINE), 'utf8');
     assert.match(dockerfile, /apk add[^\n]*tzdata/, 'tzdata absente de l’image');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+
+describe('L’historisation : aucune écriture sans trace', () => {
+  /*
+   * AVEC DEUX ROLES, LA TRACE REMPLACE LA RESTRICTION.
+   *
+   * Un administrateur peut tout faire. Ce qui répond à l'erreur n'est donc
+   * plus le refus — c'est le journal : qui, quand, quoi, et pourquoi. Une
+   * route d'écriture qui oublie `record()` ouvre un angle mort dans
+   * exactement le dispositif qui tient lieu de garde-fou.
+   *
+   * Le contrôle est grossier — il compte — mais il attrape le cas qui
+   * arrive vraiment : une route ajoutée dans un fichier existant sans que
+   * l'on pense au journal.
+   */
+  const DOSSIER = new URL('server/routes/', RACINE);
+
+  test('chaque fichier de routes trace au moins autant qu’il écrit', () => {
+    const manques = [];
+    for (const nom of fs.readdirSync(DOSSIER)) {
+      const source = fs.readFileSync(new URL(nom, DOSSIER), 'utf8');
+      const ecritures = (source.match(/Routes\.(post|patch|put|delete)\(/g) ?? []).length;
+      if (!ecritures) continue;
+      const traces = (source.match(/\brecord\(\{/g) ?? []).length;
+      if (traces < ecritures) {
+        manques.push(nom + ' : ' + ecritures + ' écriture(s), ' + traces + ' trace(s)');
+      }
+    }
+    assert.deepEqual(manques, [], 'routes d’écriture sans trace : ' + manques.join(' | '));
+  });
+
+  test('tout geste destructeur exige un motif', () => {
+    /*
+     * Un motif obligatoire n'est pas une formalité : c'est la seule chose
+     * qui, dans six mois, dira POURQUOI cette activité a disparu de
+     * l'historique. Sans lui, le journal dit qui et quand — et laisse la
+     * question qui compte sans réponse.
+     */
+    const attendus = [
+      ['activites.js', 'DELETE', 'mise à la corbeille d’une activité'],
+      ['vehicules.js', '/:id/archiver', 'archivage d’un véhicule'],
+      ['entretiens.js', '/:id/clore', 'clôture d’une échéance'],
+      ['fichiers.js', 'DELETE', 'suppression d’une pièce jointe'],
+    ];
+    for (const [fichier, , quoi] of attendus) {
+      const source = fs.readFileSync(new URL(fichier, DOSSIER), 'utf8');
+      assert.match(source, /rules\.requiredReason/,
+        quoi + ' : aucun motif obligatoire dans ' + fichier);
+    }
+  });
+
+  test('le journal ne peut pas être modifié, même avec un accès à la base', () => {
+    const schema = fs.readFileSync(new URL('server/db/schema.sql', RACINE), 'utf8');
+    assert.match(schema, /CREATE TRIGGER audit_log_no_update BEFORE UPDATE OR DELETE ON audit_log/);
+    assert.match(schema, /RAISE EXCEPTION/);
+  });
+
+  test('rien de ce qui porte l’historique ne se détruit vraiment', () => {
+    /*
+     * Le contraire d'une restriction : plutôt qu'empêcher la suppression,
+     * on la rend réversible. Chacune de ces tables doit donc porter une
+     * colonne de corbeille ou d'archivage.
+     */
+    const schema = fs.readFileSync(new URL('server/db/schema.sql', RACINE), 'utf8');
+    const bloc = (table) => {
+      const i = schema.indexOf('CREATE TABLE IF NOT EXISTS ' + table + ' (');
+      return schema.slice(i, schema.indexOf('\n);', i));
+    };
+    assert.match(bloc('activites'), /deleted_at\s+TIMESTAMPTZ/, 'activites sans corbeille');
+    assert.match(bloc('vehicules'), /archived_at\s+TIMESTAMPTZ/, 'vehicules sans archivage');
+    assert.match(bloc('fichiers'), /deleted_at\s+TIMESTAMPTZ/, 'fichiers sans corbeille');
+    // Un entretien déjà réalisé se clôt plutôt que de disparaître.
+    const statut = bloc('entretiens').split('\n').find((l) => /^\s*statut\s+TEXT/.test(l));
+    assert.ok(statut && statut.includes("'CLOS'"),
+      'entretiens : pas de statut CLOS — une échéance réalisée disparaîtrait');
+  });
+});
+
+
+/* ------------------------------------------------------------------ */
+
+/**
+ * Le compose de production.
+ *
+ * Docker n'est pas disponible sur le poste de developpement : `docker
+ * compose config` ne peut pas servir de garde-fou. Ces controles tiennent
+ * ce role. Ils ne verifient pas que le deploiement fonctionne — ils
+ * verifient qu'il ne redevient pas, par glissement, le montage local.
+ *
+ * Chacun d'eux correspond a une faute qui ne se voit PAS au deploiement :
+ * l'application demarre, l'ecran s'affiche, et le defaut n'apparait qu'au
+ * premier incident. Un mot de passe de base en clair dans un fichier
+ * versionne, un port de base ouvert sur l'internet, une ancre d'audit
+ * posee sur un systeme de fichiers ephemere.
+ */
+describe('Le compose de production ne redevient pas celui du poste', () => {
+  const texte = fs.readFileSync(new URL('docker-compose.coolify.yml', RACINE), 'utf8');
+  // Les lignes utiles : ni vides, ni commentaires. Un controle qui se
+  // satisferait d'une mention en commentaire ne controlerait rien.
+  const utile = texte
+    .split('\n')
+    .filter((l) => l.trim() && !l.trim().startsWith('#'))
+    .join('\n');
+
+  /** Le reglage `cle: valeur`, guillemets optionnels, ou null s'il est absent. */
+  const reglage = (cle) => {
+    const m = utile.match(new RegExp('^[ \\t]*' + cle + ':[ \\t]*(.*)$', 'm'));
+    return m ? m[1].trim().replace(/^['"]|['"]$/g, '') : null;
+  };
+
+  test('il existe, et il est distinct du compose local', () => {
+    const local = fs.readFileSync(new URL('docker-compose.yml', RACINE), 'utf8');
+    assert.notEqual(texte, local);
+    assert.match(
+      local, /DEVELOPPEMENT UNIQUEMENT/,
+      'le compose local doit se signaler comme tel, sinon quelqu’un le deploiera',
+    );
+  });
+
+  test('aucun secret n’y est ecrit en dur', () => {
+    for (const nom of ['APP_SECRET', 'APP_PASSWORD_PEPPER', 'POSTGRES_PASSWORD']) {
+      const v = reglage(nom);
+      assert.ok(v !== null, nom + ' est absent du compose de production');
+      assert.match(
+        v, /^\$\{[A-Z_]+(:[?-][^}]*)?\}$/,
+        nom + ' doit venir de l’environnement, pas du fichier — trouve : ' + v,
+      );
+    }
+  });
+
+  test('les variables vitales font echouer le deploiement si elles manquent', () => {
+    // `${VAR}` ou `${VAR:-}` demarre sur une chaine vide, en silence.
+    // Seul `${VAR:?message}` arrete le deploiement.
+    for (const nom of ['APP_SECRET', 'APP_PASSWORD_PEPPER', 'POSTGRES_PASSWORD',
+      'POSTGRES_USER', 'POSTGRES_DB', 'ALLOWED_ORIGINS']) {
+      const v = reglage(nom);
+      assert.ok(v !== null, nom + ' est absent du compose de production');
+      assert.match(
+        v, /^\$\{[A-Z_]+:\?[^}]+\}$/,
+        nom + ' doit s’ecrire ${…:?message} : sans cela, une variable oubliee ' +
+        'laisse l’application demarrer sur une valeur vide — trouve : ' + v,
+      );
+    }
+  });
+
+  test('aucun port n’est publie sur la machine', () => {
+    assert.ok(
+      !/^[ \t]*ports:/m.test(utile),
+      'un `ports:` publie le service sur l’hote — derriere le proxy de Coolify rien ' +
+      'ne le justifie, et sur le service `base` cela ouvrirait PostgreSQL a l’exterieur',
+    );
+  });
+
+  test('la posture de securite est celle de la production', () => {
+    const attendus = {
+      NODE_ENV: 'production',
+      SECURE_COOKIES: 'true',
+      ENABLE_HSTS: 'true',
+      TRUST_PROXY: 'true',
+      TRUST_REAL_IP: 'false',
+      TRUST_PROXY_HOPS: '1',
+    };
+    for (const [cle, attendu] of Object.entries(attendus)) {
+      assert.equal(reglage(cle), attendu, cle + ' doit valoir ' + attendu + ' en production');
+    }
+  });
+
+  test('le dossier de l’ancre d’audit est un volume persistant', () => {
+    assert.match(
+      utile, /-[ \t]*donnees-app:\/app\/data/,
+      'sans ce volume, l’ancre externe du journal disparait a chaque redeploiement ' +
+      'et ne prouve plus rien',
+    );
+    assert.equal(reglage('AUDIT_ANCRE_EXTERNE'), 'true', 'l’ancre doit etre active');
+    for (const volume of ['donnees-base', 'donnees-app']) {
+      assert.match(
+        utile, new RegExp('^  ' + volume + ':[ \\t]*$', 'm'),
+        'le volume ' + volume + ' doit etre declare, sinon il n’est pas persistant',
+      );
+    }
+  });
+
+  test('le fuseau horaire est pose sur les deux services', () => {
+    // Un par service. Sans TZ, le conteneur tourne en UTC et, au Maroc,
+    // l’activite saisie apres minuit est refusee comme etant dans le futur.
+    const n = (utile.match(/^[ \t]*TZ:[ \t]*\$\{TZ:-Africa\/Casablanca\}[ \t]*$/gm) || []).length;
+    assert.equal(n, 2, 'TZ doit etre pose sur `base` ET sur `application`, pas sur l’un des deux');
+  });
+
+  test('la base est prete avant que l’application parte', () => {
+    assert.match(utile, /condition:[ \t]*service_healthy/);
+    assert.match(utile, /pg_isready/);
+  });
+
+  test('la sonde de l’application interroge /healthz', () => {
+    assert.match(utile, /\/healthz/);
+  });
+
+  test('la procedure de deploiement existe et dit l’essentiel', () => {
+    const doc = fs.readFileSync(new URL('docs/DEPLOIEMENT-COOLIFY.md', RACINE), 'utf8');
+    assert.match(doc, /docker-compose\.coolify\.yml/,
+      'la procedure doit nommer le fichier a deployer');
+    assert.match(doc, /superadmin/,
+      'la creation du super-administrateur doit y figurer : sans elle, l’installation ' +
+      'est dans une impasse, l’administrateur ne pouvant pas creer de compte');
+    assert.match(doc, /BOOTSTRAP_ADMIN_PASSWORD/,
+      'le retrait du mot de passe d’installation doit y figurer');
+    // Toute variable exigee par le compose doit etre expliquee quelque part
+    // dans la procedure : une variable obligatoire absente de la doc est un
+    // deploiement qui echoue, la nuit, sans que personne sache pourquoi.
+    for (const m of utile.matchAll(/\$\{([A-Z_]+):\?/g)) {
+      assert.ok(doc.includes(m[1]), m[1] + ' est obligatoire mais absent de la procedure');
+    }
   });
 });

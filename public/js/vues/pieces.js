@@ -22,7 +22,7 @@
  * route. Le PDF, lui, part tel quel — on ne recompresse pas un document.
  */
 import {
-  h, donnee, fill, api, icone, signalerErreur, etat, succes, confirmer,
+  h, donnee, fill, api, icone, signalerErreur, etat, succes, demanderMotif,
 } from '../core.js';
 
 /** Au-dela, on reduit. En deca, on n'y touche pas : recompresser degrade. */
@@ -237,17 +237,18 @@ export function galeriePieces(entity, entityId, { modifiable = true } = {}) {
         ? h('button', {
           type: 'button', class: 'retirer', title: 'Supprimer', 'aria-label': 'Supprimer ' + p.nom,
           onclick: async () => {
-            const ok = await confirmer({
-              titre: 'Supprimer cette pièce ?',
-              message: '« ' + p.nom + ' » sera définitivement supprimée. ' +
-                'Il n’y a pas de corbeille pour les pièces jointes.',
-              libelleConfirmation: 'Supprimer',
-              danger: true,
+            // Un motif, comme pour toute mise à la corbeille : c'est ce qui,
+            // dans six mois, dira pourquoi cette photo a disparu de la fiche.
+            const motif = await demanderMotif({
+              titre: 'Mettre cette pièce à la corbeille ?',
+              message: '« ' + p.nom + ' » sortira de la fiche. Elle est conservée, et un '
+                + 'super-administrateur peut la restaurer.',
+              libelleConfirmation: 'Mettre à la corbeille',
             });
-            if (!ok) return;
+            if (!motif) return;
             try {
-              await api.delete('/api/fichiers/' + p.id);
-              succes('Pièce supprimée', p.nom);
+              await api.delete('/api/fichiers/' + p.id, { motif });
+              succes('Pièce mise à la corbeille', p.nom);
               await recharger();
             } catch (err) { signalerErreur(err, 'Suppression impossible'); }
           },
