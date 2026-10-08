@@ -18,7 +18,7 @@ lancent depuis votre poste.
 ## Sommaire
 
 1. [Avant de commencer](#1-avant-de-commencer)
-2. [Le DNS](#2-le-dns)
+2. [Le sous-domaine](#2-le-sous-domaine)
 3. [Les secrets](#3-les-secrets)
 4. [Le projet Coolify](#4-le-projet-coolify)
 5. [Les variables d'environnement](#5-les-variables-denvironnement)
@@ -43,7 +43,8 @@ lancent depuis votre poste.
 | Serveur | le Hetzner qui porte `lahlal_samuplus` |
 | Accès | SSH root, et le compte Coolify |
 | Dépôt | `github.com/khalilmejdo/lahlal_location`, branche `main` |
-| Sous-domaine | à choisir — ce document prend `flotte.lahlal.ma` |
+| Sous-domaine | `flotte.lahlal-samuplus.ma` — un sous-domaine par application, comme `gestion.lahlal-samuplus.ma` pour SAMU PLUS |
+| Zone DNS | chez Hetzner **ou** chez le registrar — fiche 15 § 2 et § 3 |
 | Fichier compose | `docker-compose.coolify.yml` (**pas** `docker-compose.yml`) |
 
 ### Les deux fichiers compose, et pourquoi il y en a deux
@@ -66,28 +67,101 @@ free -m
 docker ps --format 'table {{.Names}}\t{{.Status}}'
 ```
 
-Comptez ~400 Mo de mémoire pour PostgreSQL et ~150 Mo pour l'application.
-Si le serveur est déjà à l'étroit, réglez cela **avant** — un déploiement
-qui déclenche le tueur de mémoire emporte aussi samuplus.
+Comptez ~400 Mo de mémoire pour PostgreSQL et ~150 Mo pour l'application,
+plus la place du *build* : Coolify compile l'image sur le serveur.
+
+**Lisez ces trois chiffres avant de continuer**, et n'y allez pas si :
+
+| Mesure | Seuil de prudence |
+|---|---|
+| `free -m`, colonne *available* | moins de **700 Mo** |
+| `df -h /`, colonne *Avail* | moins de **5 Go** |
+
+> **Un déploiement qui déclenche le tueur de mémoire emporte aussi SAMU PLUS.**
+> C'est le seul vrai risque de cette opération : les deux applications sont
+> séparées en tout — projet, base, volumes, secrets — sauf qu'elles partagent
+> la machine. Une mise en service de flotte qui manque de mémoire ne se
+> contente pas d'échouer, elle fait tomber la facturation.
+>
+> Si la place manque : la fiche **08 — ESPACE DISQUE** de
+> `PROCEDURES-SERVEUR` donne de quoi récupérer du disque (images Docker
+> orphelines, anciens *builds*). Pour la mémoire, un serveur plus grand est la
+> seule réponse honnête.
+
+**Prenez une sauvegarde de SAMU PLUS avant de commencer.** Elle ne protège pas
+flotte, qui n'a encore rien ; elle protège ce qui tourne déjà, au cas où le
+serveur devait être redémarré en cours de route. C'est l'étape 5 de la
+checklist `A-FAIRE-SAMU-PLUS-MISE-EN-LIGNE-ET-GOOGLE.md`.
 
 ---
 
-## 2. Le DNS
+## 2. Le sous-domaine
 
-Chez le registrar, un enregistrement `A` vers l'adresse IPv4 du serveur :
+Un enregistrement `A` qui pointe `flotte.lahlal-samuplus.ma` vers l'adresse
+IPv4 du serveur — la **même** que celle qui sert déjà
+`gestion.lahlal-samuplus.ma`. Les deux applications partagent la machine et
+son proxy ; c'est le nom qui les sépare, pas l'adresse.
 
+### D'abord : où vit la zone DNS ?
+
+La réponse décide de l'écran où aller. Depuis votre poste :
+
+```powershell
+Resolve-DnsName lahlal-samuplus.ma -Type NS -Server 8.8.8.8
 ```
-flotte.lahlal.ma.    A    <IP du serveur>
+
+- Les serveurs répondus contiennent **`hetzner`** → la zone est chez Hetzner,
+  allez au § 2.1.
+- Ils portent le nom du **registrar** (là où le domaine a été acheté) → § 2.2.
+
+> La fiche **15 — CHANGEMENT DE DOMAINE** du dossier `PROCEDURES-SERVEUR`
+> traite les deux cas en détail (§ 2 et § 3). Ce qui suit en est le strict
+> nécessaire pour ajouter un sous-domaine de plus.
+
+### 2.1 — La zone est chez Hetzner
+
+[console.hetzner.com](https://console.hetzner.com) → le projet → **DNS** → la
+zone `lahlal-samuplus.ma` → **Add record** :
+
+| Champ | Valeur |
+|---|---|
+| Type | `A` |
+| Name | `flotte` |
+| Value | l'IPv4 du serveur |
+| TTL | laisser le défaut |
+
+**Le champ `Name` ne porte que `flotte`**, pas le domaine entier. Écrire
+`flotte.lahlal-samuplus.ma` y créerait
+`flotte.lahlal-samuplus.ma.lahlal-samuplus.ma` — l'erreur classique, et elle
+ne se voit qu'au moment où le certificat échoue.
+
+### 2.2 — La zone est chez le registrar
+
+Même enregistrement, dans l'éditeur de zone du registrar : type `A`, nom
+`flotte`, valeur l'IPv4 du serveur. Même piège sur le nom.
+
+### Retrouver l'IPv4 du serveur
+
+Si vous ne l'avez pas sous la main, elle est celle qui sert déjà SAMU PLUS :
+
+```powershell
+Resolve-DnsName gestion.lahlal-samuplus.ma -Type A -Server 8.8.8.8
 ```
 
-Attendez la propagation avant de continuer, sinon l'émission du certificat
-échouera et il faudra la relancer à la main :
+### Attendre, et vérifier
 
-```sh
-dig +short flotte.lahlal.ma
+```powershell
+Resolve-DnsName flotte.lahlal-samuplus.ma -Type A -Server 8.8.8.8
 ```
 
-La réponse doit être l'IP du serveur, et rien d'autre.
+La réponse doit être l'IP du serveur, et rien d'autre. **N'allez pas plus loin
+avant.** Coolify demande le certificat à Let's Encrypt dès que le domaine est
+posé sur le service ; si le nom ne résout pas encore, l'émission échoue et il
+faut la relancer à la main.
+
+Comptez quelques minutes, parfois une heure selon le TTL de la zone. Interroger
+`8.8.8.8` plutôt que le résolveur du poste évite de lire une réponse négative
+mise en cache localement.
 
 ---
 
@@ -168,7 +242,7 @@ Onglet **Environment Variables** de la ressource. Une par ligne.
 | `POSTGRES_PASSWORD` | *(celui généré à l'étape 3)* |
 | `APP_SECRET` | *(64 hex, étape 3)* |
 | `APP_PASSWORD_PEPPER` | *(64 hex, étape 3, **différent du précédent**)* |
-| `ALLOWED_ORIGINS` | `https://flotte.lahlal.ma` |
+| `ALLOWED_ORIGINS` | `https://flotte.lahlal-samuplus.ma` |
 | `BOOTSTRAP_ADMIN_PASSWORD` | *(un mot de passe fort, temporaire)* |
 
 ### Facultatives
@@ -181,8 +255,8 @@ Onglet **Environment Variables** de la ressource. Une par ligne.
 
 ### Trois pièges
 
-**`ALLOWED_ORIGINS` n'a pas de barre oblique finale.** `https://flotte.lahlal.ma/`
-est une valeur différente de `https://flotte.lahlal.ma`, et la protection
+**`ALLOWED_ORIGINS` n'a pas de barre oblique finale.** `https://flotte.lahlal-samuplus.ma/`
+est une valeur différente de `https://flotte.lahlal-samuplus.ma`, et la protection
 CSRF rejettera alors tout enregistrement : l'application s'affichera très
 bien, et rien ne pourra être saisi.
 
@@ -209,7 +283,7 @@ Dans **Configuration** → service `application` :
 
 | Champ | Valeur |
 |---|---|
-| Domains | `https://flotte.lahlal.ma` |
+| Domains | `https://flotte.lahlal-samuplus.ma` |
 | Port | `3000` |
 
 Le service `base` **n'a pas de domaine**. Il ne doit pas en avoir : la
@@ -259,7 +333,7 @@ donnée existante. C'est ce qui permet de redéployer sans intervention.
 Vérifiez de l'extérieur :
 
 ```sh
-$ curl -i https://flotte.lahlal.ma/healthz
+$ curl -i https://flotte.lahlal-samuplus.ma/healthz
 ```
 
 Attendu : `HTTP/2 200`, et un corps JSON indiquant la base joignable.
@@ -328,7 +402,7 @@ Le script affiche le mot de passe **une seule fois** :
 ```
 
 Copiez-le dans le gestionnaire de mots de passe immédiatement, puis
-connectez-vous à `https://flotte.lahlal.ma` et changez-le.
+connectez-vous à `https://flotte.lahlal-samuplus.ma` et changez-le.
 
 En cas de perte :
 
@@ -381,9 +455,9 @@ un téléphone de préférence : c'est l'usage principal.
 
 ### Accès et sécurité
 
-- [ ] `https://flotte.lahlal.ma` répond, certificat valide, cadenas fermé.
-- [ ] `http://flotte.lahlal.ma` redirige vers `https`.
-- [ ] `https://flotte.lahlal.ma/healthz` → `200`.
+- [ ] `https://flotte.lahlal-samuplus.ma` répond, certificat valide, cadenas fermé.
+- [ ] `http://flotte.lahlal-samuplus.ma` redirige vers `https`.
+- [ ] `https://flotte.lahlal-samuplus.ma/healthz` → `200`.
 - [ ] Connexion en super-administrateur : acceptée.
 - [ ] Connexion avec un mot de passe faux : refusée, et après 5 essais le
       compte est verrouillé 15 minutes.
